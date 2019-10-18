@@ -1,4 +1,4 @@
-program writerate
+      program writerate
 
 c====================================================
 c       a program to bin the trj with respect to the 
@@ -8,8 +8,8 @@ c====================================================
         implicit none
         integer nimage,nxx,jmin,jmin0,imother,tmother
         !nimage: number of cells 
-        parameter(nimage=20)
-        parameter(nxx=10000000)
+        parameter(nimage=17)
+        parameter(nxx=200)
         integer icell(nimage),k,kk,ii,j,i,ij
         double precision mc1,cd1,cdist(nimage)
         double precision mindist,mindistr
@@ -50,12 +50,11 @@ c====================================================
         
 20      continue
 
-          write(38,100) (dble(nmatr(imother,j))/dble(tmother), 
-     c     j=1,nimage)
+c          write(38,100) (dble(nmatr(imother,j))/dble(tmother),j=1,nimage)
 
-100     format(20(f8.6,2x))
+c 100     format(20(f8.6,2x))
 
-        end
+c        end
 
 
           write(38,*) (dble(nmatr(imother,j))/dble(tmother), j=1,nimage)

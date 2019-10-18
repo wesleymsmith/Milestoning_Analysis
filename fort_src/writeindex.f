@@ -11,7 +11,7 @@ c=================================
 
 c       nimage is number of cells
         parameter(nimage=17)
-        parameter(nxx=10000000)
+        parameter(nxx=200)
         integer icell(nimage),k,kk,ii,j,i,ij
         double precision mc1,mc2,cd1,cd2,cdist(nimage)
         double precision mindist,mindistr
