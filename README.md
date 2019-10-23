@@ -1,6 +1,8 @@
 # Milestoning_Analysis
 This repository contains notebooks detailing implementation, testing, and application of 1D milestoning methods. See "Margaliano, L. et. al 'Free Energy and Kinetics of Conformational Transitions from Voronoi Tessellated Milestoning with Restraining Potential' JCTC 2009. 5; DOI:10.1021/ct900279z" for an in depth discussion of the background and methodology.
 
+Users who want to run the notebooks through google colab or other online notebook servers will need to clone the repo locally. They will also likely need to locally install the f90nml and bokeh packages for the notebooks that use them.
+
 1. Calculate_Bin_Escape_Matrix_1D.ipynb - Tests binning procedure on a random data set and computes a corresponding 'escape matrix'
 
 2. Well_Test_Sim.ipynb - Runs two testing simulations as milestoning test cases. The first is a non-stochastic simulation of a single particle in a simple harmonic well using a leapfrog algorithm to propogate dynamics. The second simulates the same single particle in a harmonic well but propogates using langevin dynamics to simulate adding thermal coupling and dampening. Running this will create the files Test_Simulation_Milestoning_Data.csv for the non-stochastic simulation and Test_Simulation_Milestoning_Data.lvd.csv for the langevin dynamics simulation.
