@@ -24,9 +24,21 @@ def analyze_milestone1D_data(dataTable,windowMins,windowMaxs,verbose=False):
         if xbin in windows:
             tempDat=simData[simData.Window==xbin]
             cVal=xbin+1
+            #binVec tracks the index of the current bin. Bin indices
+            #are numbered starting at 1 so that we can use values of 0
+            #in boolean calculations
             binVec=np.array(tempDat.X_Index+1)
+            #binC is equal to 1 if the coordinate is in the bin of the current window
+            #and zero if not
             binC=(binVec==cVal)
+            #binT tracks which frames a transition has occured in
+            #for frames where the coordinate is not in the current window's bin (1-binC[1:])
+            #but was in the previous frame (binC[:-1]) list the index of the 
+            #current coordinate bin (binVec[1:]) all other frames are 0
             binT=(1-binC[1:])*binC[:-1]*binVec[1:]
+            #tCounts returns the 2D array. The first column is a sorted list of all
+            #unique values observed in binT. The second column is how many times
+            #each of those values occured
             tCounts=np.unique(binT,return_counts=True)
             transInds=tCounts[0][1:] #first entry should always be for binT==0
             transCounts=tCounts[1][1:]
@@ -37,6 +49,10 @@ def analyze_milestone1D_data(dataTable,windowMins,windowMaxs,verbose=False):
             #need to exclude frames where coordinate has not just transistioned and is not
             #in window bin from binT
             runVec=binT[np.nonzero(binC[1:]+binT)] 
+            #use itertools to get 'runs' in runVec listing the value of the repeated number in the run
+            #and the length of the run as a 2D array
+            #I.e. runList[:,0] gives the values of the repeated numbers themselves
+            #runList[:,1] gives the length of the corresponding runs
             runList=np.array([[int(j[0]),len(j)] for j in \
                               [list(g) for k,g in itertools.groupby(runVec)]])
             #generate R vector
