@@ -34,7 +34,11 @@ def analyze_milestone1D_data(dataTable,windowMins,windowMaxs,verbose=False):
             #generate escape matrix
             for iInd,Ind in enumerate(transInds):
                 escapeMat[iVal,Ind-1]=1.*transCounts[iInd]/cCount
-            runList=np.array([[int(j[0]),len(j)] for j in [list(g) for k,g in itertools.groupby(binT)]])
+            #need to exclude frames where coordinate has not just transistioned and is not
+            #in window bin from binT
+            runVec=binT[np.nonzero(binC[1:]+binT)] 
+            runList=np.array([[int(j[0]),len(j)] for j in \
+                              [list(g) for k,g in itertools.groupby(runVec)]])
             #generate R vector
             for iRun,run in enumerate(runList[1:]):
                 if run[0]==0:
