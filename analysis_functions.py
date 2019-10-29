@@ -15,8 +15,10 @@ def analyze_milestone1D_data(dataTable,windowMins,windowMaxs,verbose=False):
     xbins=np.sort(simData.X_Index.unique())
     nBins=len(xbins)
     escapeMat=np.zeros((nBins,nBins))
-    rVec=np.zeros(nBins-1)
+    rMat=np.zeros([nBins,nBins-1])
+    crossArray=np.zeros([nBins,2])
     tSum=0
+    countsVec=np.zeros(nBins)
     #iVal->escape matrix row index
     #xbin->window
     #cVal->place holder for bin index with indexing starting at 1
@@ -24,21 +26,9 @@ def analyze_milestone1D_data(dataTable,windowMins,windowMaxs,verbose=False):
         if xbin in windows:
             tempDat=simData[simData.Window==xbin]
             cVal=xbin+1
-            #binVec tracks the index of the current bin. Bin indices
-            #are numbered starting at 1 so that we can use values of 0
-            #in boolean calculations
             binVec=np.array(tempDat.X_Index+1)
-            #binC is equal to 1 if the coordinate is in the bin of the current window
-            #and zero if not
             binC=(binVec==cVal)
-            #binT tracks which frames a transition has occured in
-            #for frames where the coordinate is not in the current window's bin (1-binC[1:])
-            #but was in the previous frame (binC[:-1]) list the index of the 
-            #current coordinate bin (binVec[1:]) all other frames are 0
             binT=(1-binC[1:])*binC[:-1]*binVec[1:]
-            #tCounts returns the 2D array. The first column is a sorted list of all
-            #unique values observed in binT. The second column is how many times
-            #each of those values occured
             tCounts=np.unique(binT,return_counts=True)
             transInds=tCounts[0][1:] #first entry should always be for binT==0
             transCounts=tCounts[1][1:]
@@ -49,36 +39,80 @@ def analyze_milestone1D_data(dataTable,windowMins,windowMaxs,verbose=False):
             #need to exclude frames where coordinate has not just transistioned and is not
             #in window bin from binT
             runVec=binT[np.nonzero(binC[1:]+binT)] 
-            #use itertools to get 'runs' in runVec listing the value of the repeated number in the run
-            #and the length of the run as a 2D array
-            #I.e. runList[:,0] gives the values of the repeated numbers themselves
-            #runList[:,1] gives the length of the corresponding runs
             runList=np.array([[int(j[0]),len(j)] for j in \
                               [list(g) for k,g in itertools.groupby(runVec)]])
             #generate R vector
             for iRun,run in enumerate(runList[1:]):
                 if run[0]==0:
                     #the bin edge index between bins i and j is min(i,j)
-                    rVec[np.min([runList[iRun,0]-1,xbin])]+=run[1]
-            tSum=tSum+np.sum(binC)
+                    rMat[iVal,np.min([runList[iRun,0]-1,xbin])]+=run[1]
+            #tSum=tSum+np.sum(binC)
+            countsVec[iVal]=np.sum(binC)
+            #count number of times central cell was traversed.
+            #we again make use of itertools.
+            #First we remove all zero entries from binT
+            #Then we compute runs of the non-zero binT. Here, however, we don't care
+            #about the counts themselves. I.e. we only care about the binIDs
+            #To count the transitions from the left edge to right edge or vice versa
+            #we iterate over this list of binIDs and update an nBinEdges x 2 array (crossArray)
+            #by adding 1 to the first column of the row for the current bin if the
+            #if the current edgeID is the right edge and the previous was the right
+            #edge or adding 1 to the second column if the current edgeID is left
+            #edge and the previous was the right edge.
+            crossings=(np.array([[int(j[0]),len(j)] for j in \
+                              [list(g) for k,g in itertools.groupby(binT[np.nonzero(binT)])]]
+                              )[:,0]).flatten()
+            #rather than needing a for loop, we can use vector arithmetic.
+            #we subract entries 0:n-1 from entries 1:n and divide by 2.
+            #this will yield a -1 when a traversal from the left edge to the right edge occured
+            #or a +1 when a traversal from right edge to left edge occured.
+            #we then count the number of -1's and this to column 0 of the row in crossArray for
+            #the current window then count the number of 1's and this to column 1 of that row.
+            crossings=(crossings[1:]-crossings[:-1])/2
+            crossArray[iVal,0]=crossArray[iVal,0]+np.sum(crossings==1)
+            crossArray[iVal,1]=crossArray[iVal,1]+np.sum(crossings==-1)
             if verbose:
                 print "--- --- ---"
                 print "escapeMatrix entry for window %g:"%xbin
                 print '['+', '.join(map(lambda x: '%.5f'%x,escapeMat[iVal,:]))+']'
+                print "Number of crossings (left-to-right,right-to-left):",
+                print "(%g,%g)"%(crossArray[iVal,0],crossArray[iVal,1])
     if verbose:
         print "--- --- ---"
         
-    Rmat=np.matrix(escapeMat)
+    tSum=np.sum(countsVec)
+    Emat=np.matrix(escapeMat)
     Dmat=np.matrix(np.diag(1-np.sum(escapeMat,axis=1)))
 
-    RDmat=Rmat+Dmat
+    Amat=Emat+Dmat
 
-    outEig=np.linalg.eig(RDmat.T)
+    outEig=np.linalg.eig(Amat.T)
     si=np.argsort(1-outEig[0])
     if verbose:
         print 'Eigenvalues:',
         print outEig[0][si]
-    outVec=np.array(outEig[1])[:,si[0]]
-    outVec=outVec/np.sum(outVec)
+    piVec=np.array(outEig[1])[:,si[0]]
+    piVec=piVec/np.sum(piVec)
     
-    return (escapeMat,outVec,rVec/tSum)
+    Ri=np.zeros(nBins)
+    Ri[0]=rMat[0,0]*piVec[0]/countsVec[0]
+    Ri[-1]=rMat[-1,-1]*piVec[-1]/countsVec[-1]
+    for ii in np.arange(nBins-2)+1:
+        Ri[ii]=rMat[ii,ii]*piVec[ii]/countsVec[ii]+rMat[ii-1,ii]*piVec[ii-1]/countsVec[ii-1]
+    #Ri=1.*np.sum(rMat.T*piVec/countsVec,axis=0)
+    NijMat=np.zeros([nBins,nBins])
+    for ii in np.arange(nBins-1):
+        NijMat[ii,ii+1]=piVec[ii]*crossArray[ii,0]/countsVec[ii]
+        NijMat[ii+1,ii]=piVec[ii]*crossArray[ii,1]/countsVec[ii]
+    Qmat=np.zeros([nBins,nBins])
+    for iRow in np.arange(nBins-1):
+        Qmat[iRow,iRow+1]=NijMat[iRow,iRow+1]/Ri[iRow]
+        Qmat[iRow+1,iRow]=NijMat[iRow+1,iRow]/Ri[iRow+1]
+        
+    Qrows=np.nonzero(np.sum(Qmat,axis=1)>0)[0]
+    Qmat=Qmat[Qrows[:,None],Qrows]
+    
+    for iRow,row in enumerate(Qmat):
+        Qmat[iRow,iRow]=-np.sum(row)
+    
+    return (escapeMat,piVec,rMat,crossArray,countsVec,Ri,NijMat,Qmat,Qrows)
