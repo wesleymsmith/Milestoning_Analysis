@@ -8,7 +8,7 @@ c====================================================
         implicit none
         integer nimage,nxx,jmin,jmin0,n12,n21,n11,n22,r1,r2
         integer nimagem,nimagep
-        integer nm,nm0
+        integer nm,nm0,nT
         parameter(nxx=200)
         integer j,i
 
@@ -24,6 +24,7 @@ c set counters
         n22 = 0
         r1  = 0
         r2  = 0
+        nT  = 0
 c=======================
 
 c=======================
@@ -57,6 +58,7 @@ c=======================
            if((nm0.eq.1).and.(nm.eq.2)) n12=n12+1
            if((nm0.eq.2).and.(nm.eq.1)) n21=n21+1
 
+           if(jmin.eq.nimage) nT=nT+1    
 
         enddo
 
@@ -64,12 +66,16 @@ c=======================
 
 c  fort.39 will be tmpallN
 c  fort.40 will be tmpallR
+c  fort.50 will be tmpallT
 
           open(39,file="tmpallN")
           open(40,file="tmpallR")
+          open(50,file="tmpallT")
            write(39,*) n12,n21
            write(40,*) r1,r2
+           write(50,*) nT
           close(39)
           close(40)
+          close(50)
 
         end

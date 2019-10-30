@@ -31,23 +31,23 @@ c       nimage is number of cells
  
         ! centers (AKA images) values here
      
-        c1av0(17)=  4.0d0
-        c1av0(16)=  3.5d0
-        c1av0(15)=  3.0d0
-        c1av0(14)=  2.5d0
-        c1av0(13)=  2.0d0
-        c1av0(12)=  1.5d0
-        c1av0(11)=  1.0d0
-        c1av0(10)=  0.5d0
-        c1av0( 9)=  0.0d0
-        c1av0( 8)= -0.5d0
-        c1av0( 7)= -1.0d0
-        c1av0( 6)= -1.5d0
-        c1av0( 5)= -2.0d0
-        c1av0( 4)= -2.5d0
-        c1av0( 3)= -3.0d0
-        c1av0( 2)= -3.5d0
         c1av0( 1)= -4.0d0
+        c1av0( 2)= -3.5d0
+        c1av0( 3)= -3.0d0
+        c1av0( 4)= -2.5d0
+        c1av0( 5)= -2.0d0
+        c1av0( 6)= -1.5d0
+        c1av0( 7)= -1.0d0
+        c1av0( 8)= -0.5d0
+        c1av0( 9)=  0.0d0
+        c1av0(10)=  0.5d0
+        c1av0(11)=  1.0d0
+        c1av0(12)=  1.5d0
+        c1av0(13)=  2.0d0
+        c1av0(14)=  2.5d0
+        c1av0(15)=  3.0d0
+        c1av0(16)=  3.5d0
+        c1av0(17)=  4.0d0
         
         
         do i=1,nxx
