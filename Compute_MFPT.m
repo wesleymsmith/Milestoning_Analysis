@@ -30,19 +30,22 @@ nmiles=ncells-1;
 %cells i and j is equal to min(i,j)
 %Nij tracks transitions from edge i to edge j
 %these are found in the entry for cell min(i,j)
-%in allN, where column 1 is for i<j and column 2 is for i>j
+%in entry i of allN, column 1 is for edge i to i+1 (left edge to right edge)
+% and column 2 is for edge i+1 to i (right edge to left edge)
 N=zeros(nmiles,nmiles);
 for k=1:nmiles;
-N(k,k+1)=mu(k)*allN(k,1)/allT(k);
-N(k+1,k)=mu(k)*allN(k,2)/allT(k);
-end
+N(k,k+1)=mu(k+1)*allN(k+1,1)/allT(k+1);
+if k<nmiles;
+  N(k+1,k)=mu(k+1)*allN(k+1,2)/allT(k+1);
+endif
+endfor
 N
 % compute Ri from Ri^a
 % We use the same convention as for Nij above
 % in allR, then entry for cell i contains the
 % timecount for edge i in the first column and
 % the timecount for edge i+1 in the second column
-R=zeros(nmiles)
+R=zeros(nmiles,1);
 %j accumulate for right side cell edges
 %  *the right hand edge for cell j is edge j
 %k accumulate for left side cell edges
@@ -50,7 +53,7 @@ R=zeros(nmiles)
 %Note j counts up from 1 to nmiles (number of edges)
 % while k counts down from ncells to 2
 for j=1:nmiles;
-  k=ncells-j+1
+  k=ncells-j+1;
   R(j)=R(j)+mu(j)*allR(j,2)/allT(j);
   R(k-1)=R(k-1)+mu(k)*allR(k,1)/allT(k);
 end

@@ -1,4 +1,5 @@
 import numpy as np
+import scipy as sp
 import pandas as pd
 import itertools
 
@@ -14,8 +15,9 @@ def analyze_milestone1D_data(dataTable,windowMins,windowMaxs,verbose=False):
     windows=np.sort(simData.Window.unique())
     xbins=np.sort(simData.X_Index.unique())
     nBins=len(xbins)
+    nEdges=nBins-1
     escapeMat=np.zeros((nBins,nBins))
-    rMat=np.zeros([nBins,nBins-1])
+    rMat=np.zeros([nBins,nEdges])
     crossArray=np.zeros([nBins,2])
     tSum=0
     countsVec=np.zeros(nBins)
@@ -94,18 +96,26 @@ def analyze_milestone1D_data(dataTable,windowMins,windowMaxs,verbose=False):
     piVec=np.array(outEig[1])[:,si[0]]
     piVec=piVec/np.sum(piVec)
     
-    Ri=np.zeros(nBins)
-    Ri[0]=rMat[0,0]*piVec[0]/countsVec[0]
-    Ri[-1]=rMat[-1,-1]*piVec[-1]/countsVec[-1]
-    for ii in np.arange(nBins-2)+1:
-        Ri[ii]=rMat[ii,ii]*piVec[ii]/countsVec[ii]+rMat[ii-1,ii]*piVec[ii-1]/countsVec[ii-1]
-    #Ri=1.*np.sum(rMat.T*piVec/countsVec,axis=0)
-    NijMat=np.zeros([nBins,nBins])
-    for ii in np.arange(nBins-1):
-        NijMat[ii,ii+1]=piVec[ii]*crossArray[ii,0]/countsVec[ii]
-        NijMat[ii+1,ii]=piVec[ii]*crossArray[ii,1]/countsVec[ii]
+    #since we stored Rij in matrix form (nBins x nEdges) we can
+    #use matrix and array arithmetic to compute Ri
+    #note that rMat.T will yield an nEdges x nBins matrix,
+    #so summing over columns (i.e. computing row sums) will
+    #give us the needed values for each edge
+    #E.g. crossArray[ii,0] = transition from edge ii-1 -> ii
+    #     crossArray[ii,1] = transition from edge ii -> ii-1
+    Ri=1.*np.sum(rMat.T*piVec/countsVec,axis=1)
+    NijMat=np.zeros([nBins-1,nBins-1])
+    for ii in np.arange(1,nEdges):
+        #note that indexing in python starts at 0 (not 1)
+        #ii loops upward over bins omitting first and last bin
+        #left to right transitions...
+        NijMat[ii-1,ii]=piVec[ii]*crossArray[ii,0]/countsVec[ii]
+        #right to left transitions
+        #jj loops downward over bins ommiting last and first bin
+        jj=nEdges-ii
+        NijMat[jj,jj-1]=piVec[jj]*crossArray[jj,1]/countsVec[jj]
     Qmat=np.zeros([nBins,nBins])
-    for iRow in np.arange(nBins-1):
+    for iRow in np.arange(0,nEdges-1):
         Qmat[iRow,iRow+1]=NijMat[iRow,iRow+1]/Ri[iRow]
         Qmat[iRow+1,iRow]=NijMat[iRow+1,iRow]/Ri[iRow+1]
         
@@ -115,4 +125,7 @@ def analyze_milestone1D_data(dataTable,windowMins,windowMaxs,verbose=False):
     for iRow,row in enumerate(Qmat):
         Qmat[iRow,iRow]=-np.sum(row)
     
-    return (escapeMat,piVec,rMat,crossArray,countsVec,Ri,NijMat,Qmat,Qrows)
+    bVec=np.zeros(nEdges)-1
+    tauVec=sp.linalg.lstsq(Qmat,bVec)
+    
+    return (escapeMat,piVec,rMat,crossArray,countsVec,Ri,NijMat,Qmat,Qrows,tauVec)
