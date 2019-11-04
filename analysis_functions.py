@@ -3,14 +3,19 @@ import scipy as sp
 import pandas as pd
 import itertools
 
-def analyze_milestone1D_data(dataTable,windowMins,windowMaxs,verbose=False):
-    winMins=np.array(windowMins)
-    winMaxs=np.array(windowMaxs)
-    windowCenters=(windowMins+windowMaxs)/2.0
-    simData=dataTable[['Window','Time','X']]
-    binEdges=winMins[1:] #np.concatenate([winMins,[winMaxs[-1]]])
-    digitize_kwds={"bins":binEdges}
-    simData['X_Index']=simData.X.apply(np.digitize,**digitize_kwds)
+def analyze_milestone1D_data(dataTable,windowMins,windowMaxs,useInds=False,verbose=False):
+    #if "useInds" is set to true, the 'X_Index' column must be present in the data table
+    #otherwise, if either useInds is false or there is no 'X_Index' column,
+    #an 'X_Index' column is generated internally.
+    if not (useInds & ('X_Index' in dataTable)):
+        #need to generate indexing data internally
+        winMins=np.array(windowMins)
+        winMaxs=np.array(windowMaxs)
+        windowCenters=(windowMins+windowMaxs)/2.0
+        simData=dataTable[['Window','Time','X']]
+        binEdges=winMins[1:] #np.concatenate([winMins,[winMaxs[-1]]])
+        digitize_kwds={"bins":binEdges}
+        simData['X_Index']=simData.X.apply(np.digitize,**digitize_kwds)
     
     windows=np.sort(simData.Window.unique())
     xbins=np.sort(simData.X_Index.unique())
