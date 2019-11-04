@@ -16,6 +16,8 @@ def analyze_milestone1D_data(dataTable,windowMins,windowMaxs,useInds=False,verbo
         binEdges=winMins[1:] #np.concatenate([winMins,[winMaxs[-1]]])
         digitize_kwds={"bins":binEdges}
         simData['X_Index']=simData.X.apply(np.digitize,**digitize_kwds)
+    else:
+        simData=dataTable[["Window","Time","X","X_Index"]]
     
     windows=np.sort(simData.Window.unique())
     xbins=np.sort(simData.X_Index.unique())
