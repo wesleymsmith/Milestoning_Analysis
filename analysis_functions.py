@@ -3,21 +3,26 @@ import scipy as sp
 import pandas as pd
 import itertools
 
-def analyze_milestone1D_data(dataTable,windowMins,windowMaxs,useInds=False,verbose=False):
+def analyze_milestone1D_data(dataTable,windowMins,windowMaxs,
+                             useInds=False,verbose=False,multiReplica=False):
     #if "useInds" is set to true, the 'X_Index' column must be present in the data table
     #otherwise, if either useInds is false or there is no 'X_Index' column,
     #an 'X_Index' column is generated internally.
+    dataCols=["Window","Time","X"]
+    if multiReplica:
+        dataCols=np.concatenate([dataCols,["Rep"]])
     if not (useInds & ('X_Index' in dataTable)):
         #need to generate indexing data internally
         winMins=np.array(windowMins)
         winMaxs=np.array(windowMaxs)
         windowCenters=(windowMins+windowMaxs)/2.0
-        simData=dataTable[['Window','Time','X']]
+        simData=dataTable[dataCols]
         binEdges=winMins[1:] #np.concatenate([winMins,[winMaxs[-1]]])
         digitize_kwds={"bins":binEdges}
         simData['X_Index']=simData.X.apply(np.digitize,**digitize_kwds)
     else:
-        simData=dataTable[["Window","Time","X","X_Index"]]
+        dataCols=np.concatenate([dataCols,["X_Index"]])
+        simData=dataTable[dataCols]
     
     windows=np.sort(simData.Window.unique())
     xbins=np.sort(simData.X_Index.unique())
@@ -33,55 +38,90 @@ def analyze_milestone1D_data(dataTable,windowMins,windowMaxs,useInds=False,verbo
     #cVal->place holder for bin index with indexing starting at 1
     for iVal,xbin in enumerate(xbins):
         if xbin in windows:
-            tempDat=simData[simData.Window==xbin]
-            cVal=xbin+1
-            binVec=np.array(tempDat.X_Index+1)
-            binC=(binVec==cVal)
-            binT=(1-binC[1:])*binC[:-1]*binVec[1:]
-            tCounts=np.unique(binT,return_counts=True)
-            transInds=tCounts[0][1:] #first entry should always be for binT==0
-            transCounts=tCounts[1][1:]
-            cCount=np.sum(binC)
-            #generate escape matrix
-            for iInd,Ind in enumerate(transInds):
-                escapeMat[iVal,Ind-1]=1.*transCounts[iInd]/cCount
-            #need to exclude frames where coordinate has not just transistioned and is not
-            #in window bin from binT
-            runVec=binT[np.nonzero(binC[1:]+binT)] 
-            runList=np.array([[int(j[0]),len(j)] for j in \
-                              [list(g) for k,g in itertools.groupby(runVec)]])
-            #generate R vector
-            for iRun,run in enumerate(runList[1:]):
-                if run[0]==0:
-                    #the bin edge index between bins i and j is min(i,j)
-                    rMat[iVal,np.min([runList[iRun,0]-1,xbin])]+=run[1]
-            #tSum=tSum+np.sum(binC)
-            countsVec[iVal]=np.sum(binC)
-            #count number of times central cell was traversed.
-            #we again make use of itertools.
-            #First we remove all zero entries from binT
-            #Then we compute runs of the non-zero binT. Here, however, we don't care
-            #about the counts themselves. I.e. we only care about the binIDs
-            #To count the transitions from the left edge to right edge or vice versa
-            #we iterate over this list of binIDs and update an nBinEdges x 2 array (crossArray)
-            #by adding 1 to the first column of the row for the current bin if the
-            #if the current edgeID is the right edge and the previous was the right
-            #edge or adding 1 to the second column if the current edgeID is left
-            #edge and the previous was the right edge.
-            crossings=(np.array([[int(j[0]),len(j)] for j in \
-                              [list(g) for k,g in itertools.groupby(binT[np.nonzero(binT)])]]
-                              )[:,0]).flatten()
-            #rather than needing a for loop, we can use vector arithmetic.
-            #we subract entries 0:n-1 from entries 1:n and divide by 2.
-            #this will yield a -1 when a traversal from the left edge to the right edge occured
-            #or a +1 when a traversal from right edge to left edge occured.
-            #we then count the number of -1's and this to column 0 of the row in crossArray for
-            #the current window then count the number of 1's and this to column 1 of that row.
-            crossings=(crossings[1:]-crossings[:-1])/2
-            crossArray[iVal,0]=crossArray[iVal,0]+np.sum(crossings==1)
-            crossArray[iVal,1]=crossArray[iVal,1]+np.sum(crossings==-1)
             if verbose:
                 print "--- --- ---"
+            winDat=simData[simData.Window==xbin]
+            if not multiReplica:
+                tempDat=winDat
+                cVal=xbin+1
+                binVec=np.array(tempDat.X_Index+1)
+                binC=(binVec==cVal)
+                binT=(1-binC[1:])*binC[:-1]*binVec[1:]
+                tCounts=np.unique(binT,return_counts=True)
+                transInds=tCounts[0][1:] #first entry should always be for binT==0
+                transCounts=tCounts[1][1:]
+                cCount=np.sum(binC)
+                #generate escape matrix
+                for iInd,Ind in enumerate(transInds):
+                    escapeMat[iVal,Ind-1]=escapeMat[iVal,Ind-1]+1.*transCounts[iInd]/cCount
+                #need to exclude frames where coordinate has not just transistioned and is not
+                #in window bin from binT
+                runVec=binT[np.nonzero(binC[1:]+binT)] 
+                runList=np.array([[int(j[0]),len(j)] for j in \
+                                  [list(g) for k,g in itertools.groupby(runVec)]])
+                #generate R vector
+                for iRun,run in enumerate(runList[1:]):
+                    if run[0]==0:
+                        #the bin edge index between bins i and j is min(i,j)
+                        rMat[iVal,np.min([runList[iRun,0]-1,xbin])]+=run[1]
+                #tSum=tSum+np.sum(binC)
+                countsVec[iVal]=countsVec[iVal]+np.sum(binC)
+                #count number of times central cell was traversed.
+                #we again make use of itertools.
+                #First we remove all zero entries from binT
+                #Then we compute runs of the non-zero binT. Here, however, we don't care
+                #about the counts themselves. I.e. we only care about the binIDs
+                #To count the transitions from the left edge to right edge or vice versa
+                #we iterate over this list of binIDs and update an nBinEdges x 2 array (crossArray)
+                #by adding 1 to the first column of the row for the current bin if the
+                #if the current edgeID is the right edge and the previous was the right
+                #edge or adding 1 to the second column if the current edgeID is left
+                #edge and the previous was the right edge.
+                crossings=(np.array([[int(j[0]),len(j)] for j in \
+                                  [list(g) for k,g in itertools.groupby(binT[np.nonzero(binT)])]]
+                                  )[:,0]).flatten()
+                #rather than needing a for loop, we can use vector arithmetic.
+                #we subract entries 0:n-1 from entries 1:n and divide by 2.
+                #this will yield a -1 when a traversal from the left edge to the right edge occured
+                #or a +1 when a traversal from right edge to left edge occured.
+                #we then count the number of -1's and this to column 0 of the row in crossArray for
+                #the current window then count the number of 1's and this to column 1 of that row.
+                crossings=(crossings[1:]-crossings[:-1])/2
+                crossArray[iVal,0]=crossArray[iVal,0]+np.sum(crossings==1)
+                crossArray[iVal,1]=crossArray[iVal,1]+np.sum(crossings==-1)
+            else:
+                if verbose:
+                    print "working on replica:",
+                for rep in winDat.Rep.unique():
+                    if verbose:
+                         print rep,
+                    tempDat=winDat[winDat.Rep==rep]
+                    cVal=xbin+1
+                    binVec=np.array(tempDat.X_Index+1)
+                    binC=(binVec==cVal)
+                    binT=(1-binC[1:])*binC[:-1]*binVec[1:]
+                    tCounts=np.unique(binT,return_counts=True)
+                    transInds=tCounts[0][1:] 
+                    transCounts=tCounts[1][1:]
+                    cCount=np.sum(binC)
+                    for iInd,Ind in enumerate(transInds):
+                        escapeMat[iVal,Ind-1]=escapeMat[iVal,Ind-1]+1.*transCounts[iInd]/cCount
+                    runVec=binT[np.nonzero(binC[1:]+binT)] 
+                    runList=np.array([[int(j[0]),len(j)] for j in \
+                                      [list(g) for k,g in itertools.groupby(runVec)]])
+                    for iRun,run in enumerate(runList[1:]):
+                        if run[0]==0:
+                            rMat[iVal,np.min([runList[iRun,0]-1,xbin])]+=run[1]
+                    countsVec[iVal]=countsVec[iVal]+np.sum(binC)
+                    crossings=(np.array([[int(j[0]),len(j)] for j in \
+                                      [list(g) for k,g in itertools.groupby(binT[np.nonzero(binT)])]]
+                                      )[:,0]).flatten()
+                    crossings=(crossings[1:]-crossings[:-1])/2
+                    crossArray[iVal,0]=crossArray[iVal,0]+np.sum(crossings==1)
+                    crossArray[iVal,1]=crossArray[iVal,1]+np.sum(crossings==-1)
+                    if verbose:
+                        print ""
+            if verbose:
                 print "escapeMatrix entry for window %g:"%xbin
                 print '['+', '.join(map(lambda x: '%.5f'%x,escapeMat[iVal,:]))+']'
                 print "Number of crossings (left-to-right,right-to-left):",
