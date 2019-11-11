@@ -176,3 +176,60 @@ def analyze_milestone1D_data(dataTable,windowMins,windowMaxs,
     tauVec=sp.linalg.lstsq(Qmat,bVec)
     
     return (escapeMat,piVec,rMat,crossArray,countsVec,Ri,NijMat,Qmat,Qrows,tauVec)
+
+def compute_escape_matrix_row_convergence(windowIndexData,multiReplica=False):
+    indData=windowIndexData[['X_Index']]
+    if multiReplica:
+        indData['Rep']=windowIndexData['Rep']
+    else:
+        indData['Rep']='rep1'
+    #print indData.head()
+    outDataTables=[]
+    for rep in indData.Rep.unique():
+        dInd=0
+        indVec=np.array(indData['X_Index'])
+        windowC=indVec[0]
+        indVec=np.array(indData[indData.Rep==rep].X_Index)
+        if np.min(indVec)<=0:
+            dInd=1-np.min(indVec)
+            windowC=windowC+dInd
+            indVec=indVec+dInd
+
+        binSet=np.unique(indVec)
+        print binSet
+        
+        binC=(indVec==windowC)
+        binT=(1-binC[1:])*binC[:-1]*indVec[1:]
+
+        #print windowC
+        #print dInd
+        for binInd in binSet:
+            outTable=pd.DataFrame({
+                "Frame":np.arange(1,len(binC)),
+                "Rep":[rep]*len(binC[:-1]),
+                "i":[(windowC-dInd)]*len(binC[:-1]),
+                "di":[(binInd-windowC)]*len(binC[:-1])
+            })
+            if binInd==windowC:
+                outTable["N"]=np.cumsum(binC[1:]+(binT>0))
+            else:
+                outTable["N"]=np.cumsum(binT==binInd)
+            outDataTables.append(outTable.copy())
+            
+    outDataTable=pd.concat(outDataTables)
+    meanTable=outDataTable.groupby(['Frame','i','di']).agg({'N':np.sum}).reset_index().sort_values(
+        ['di','i','Frame'])
+    meanTable['Rep']='Mean'
+    meanTable=meanTable[outDataTable.columns]
+    tempTable=pd.concat([outDataTable,meanTable])
+    tempTable=pd.pivot_table(index=['Frame','Rep','i'],columns='di',values='N',data=tempTable)
+    tempTable.columns=np.array(tempTable.columns)
+    tempTable=tempTable.reset_index()
+    for dCol in tempTable.columns[3:]:
+        if dCol!=0:
+            tempTable[dCol]=tempTable[dCol]/tempTable[0]
+    tempTable=tempTable.melt(id_vars=tempTable.columns[:3],var_name='di',value_name='nu')
+    tempTable=tempTable[tempTable.di!=0]
+    outDataTable=tempTable
+    
+    return(outDataTable)
