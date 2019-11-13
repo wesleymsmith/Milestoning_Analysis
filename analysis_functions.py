@@ -177,7 +177,7 @@ def analyze_milestone1D_data(dataTable,windowMins,windowMaxs,
     
     return (escapeMat,piVec,rMat,crossArray,countsVec,Ri,NijMat,Qmat,Qrows,tauVec)
 
-def compute_escape_matrix_row_convergence(windowIndexData,multiReplica=False):
+def compute_escape_matrix_row_convergence(windowIndexData,multiReplica=False,verbose=False):
     indData=windowIndexData[['X_Index']]
     if multiReplica:
         indData['Rep']=windowIndexData['Rep']
@@ -196,7 +196,7 @@ def compute_escape_matrix_row_convergence(windowIndexData,multiReplica=False):
             indVec=indVec+dInd
 
         binSet=np.unique(indVec)
-        print binSet
+        #print binSet
         
         binC=(indVec==windowC)
         binT=(1-binC[1:])*binC[:-1]*indVec[1:]
@@ -215,12 +215,19 @@ def compute_escape_matrix_row_convergence(windowIndexData,multiReplica=False):
             else:
                 outTable["N"]=np.cumsum(binT==binInd)
             outDataTables.append(outTable.copy())
+            if verbose:
+                print 'window %g, rep %s, di %g, N %g'%(
+                    windowC-dInd, rep, binInd-windowC,outTable.N.max())
             
     outDataTable=pd.concat(outDataTables)
     meanTable=outDataTable.groupby(['Frame','i','di']).agg({'N':np.sum}).reset_index().sort_values(
         ['di','i','Frame'])
     meanTable['Rep']='Mean'
     meanTable=meanTable[outDataTable.columns]
+    if verbose:
+        print 'Mean Summary'
+        print meanTable.groupby(['Rep','i','di']).agg({
+            'N':lambda x: np.max(x) if len(x)>0 else 0}).reset_index()
     tempTable=pd.concat([outDataTable,meanTable])
     tempTable=pd.pivot_table(index=['Frame','Rep','i'],columns='di',values='N',data=tempTable)
     tempTable.columns=np.array(tempTable.columns)
@@ -228,8 +235,9 @@ def compute_escape_matrix_row_convergence(windowIndexData,multiReplica=False):
     for dCol in tempTable.columns[3:]:
         if dCol!=0:
             tempTable[dCol]=tempTable[dCol]/tempTable[0]
+    tempTable[0]=tempTable[0]/(1+np.arange(len(tempTable))) #track window occupance fraction
     tempTable=tempTable.melt(id_vars=tempTable.columns[:3],var_name='di',value_name='nu')
-    tempTable=tempTable[tempTable.di!=0]
+    #tempTable=tempTable[tempTable.di!=0]
     outDataTable=tempTable
     
     return(outDataTable)
