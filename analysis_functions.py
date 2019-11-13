@@ -254,7 +254,7 @@ def compute_escape_matrix_row_convergence(windowID,windowIndexData,
                 tempTable[niCol]=tempTable[niCol]/tempTable['N_0']
         tempTable['N_0']=tempTable['N_0']/tempTable['NetFrames_0']
         dropCols=[colName for colName in tempTable.columns if 'NetFrames' in colName]
-        tempTable=tempTable.drop(columns=dropCols)
+        tempTable=tempTable.drop(dropCols,axis=1)
         tempTable=pd.melt(frame=tempTable,
                         id_vars=[colName for colName in tempTable.columns if not ('N_' in colName)],
                         var_name='di',value_name='nu')
