@@ -177,8 +177,10 @@ def analyze_milestone1D_data(dataTable,windowMins,windowMaxs,
     
     return (escapeMat,piVec,rMat,crossArray,countsVec,Ri,NijMat,Qmat,Qrows,tauVec)
 
-def compute_escape_matrix_row_convergence(windowIndexData,multiReplica=False,verbose=False):
-    indData=windowIndexData[['X_Index']]
+def compute_escape_matrix_row_convergence(windowID,windowIndexData,
+                                          multiReplica=False,verbose=False,
+                                          noAgg=False):
+    indData=windowIndexData[windowIndexData.Window==windowID][['X_Index']]
     if multiReplica:
         indData['Rep']=windowIndexData['Rep']
     else:
@@ -188,7 +190,7 @@ def compute_escape_matrix_row_convergence(windowIndexData,multiReplica=False,ver
     for rep in indData.Rep.unique():
         dInd=0
         indVec=np.array(indData['X_Index'])
-        windowC=indVec[0]
+        windowC=windowID
         indVec=np.array(indData[indData.Rep==rep].X_Index)
         if np.min(indVec)<=0:
             dInd=1-np.min(indVec)
@@ -220,24 +222,45 @@ def compute_escape_matrix_row_convergence(windowIndexData,multiReplica=False,ver
                     windowC-dInd, rep, binInd-windowC,outTable.N.max())
             
     outDataTable=pd.concat(outDataTables)
-    meanTable=outDataTable.groupby(['Frame','i','di']).agg({'N':np.sum}).reset_index().sort_values(
-        ['di','i','Frame'])
-    meanTable['Rep']='Mean'
-    meanTable=meanTable[outDataTable.columns]
-    if verbose:
-        print 'Mean Summary'
-        print meanTable.groupby(['Rep','i','di']).agg({
-            'N':lambda x: np.max(x) if len(x)>0 else 0}).reset_index()
-    tempTable=pd.concat([outDataTable,meanTable])
-    tempTable=pd.pivot_table(index=['Frame','Rep','i'],columns='di',values='N',data=tempTable)
-    tempTable.columns=np.array(tempTable.columns)
-    tempTable=tempTable.reset_index()
-    for dCol in tempTable.columns[3:]:
-        if dCol!=0:
-            tempTable[dCol]=tempTable[dCol]/tempTable[0]
-    tempTable[0]=tempTable[0]/(1+np.arange(len(tempTable))) #track window occupance fraction
-    tempTable=tempTable.melt(id_vars=tempTable.columns[:3],var_name='di',value_name='nu')
-    #tempTable=tempTable[tempTable.di!=0]
-    outDataTable=tempTable
-    
-    return(outDataTable)
+    tempTable=outDataTable
+    tempTable['NetFrames']=tempTable.Frame
+    if noAgg:
+        return outDataTable
+    else:
+        if verbose:
+            print tempTable.head()
+            print '--- --- ---'
+        testAggTab=tempTable.groupby(
+            ['Frame','i','di']).agg(
+            {'N':np.sum,'NetFrames':np.sum}).reset_index().sort_values(
+            ['di','i','Frame'])
+        testAggTab['Rep']='Mean'
+        testAggTab=testAggTab[tempTable.columns]
+        if verbose:
+            print testAggTab.head()
+            print '--- --- ---'
+        tempTable=pd.concat([tempTable,testAggTab])
+        tempTable=pd.pivot_table(index=['Frame','Rep','i'],
+                               columns='di',values=['N','NetFrames'],
+                               data=tempTable)
+        tempTable.columns=tempTable.columns.map(lambda x: '_'.join([str(xv) for xv in x]))
+        tempTable=tempTable.reset_index()
+        if verbose:
+            print tempTable.head()
+            print '--- --- ---'
+        niCols=[colName for colName in tempTable.columns if 'N_' in colName]
+        for niCol in niCols:
+            if niCol !='N_0':
+                tempTable[niCol]=tempTable[niCol]/tempTable['N_0']
+        tempTable['N_0']=tempTable['N_0']/tempTable['NetFrames_0']
+        dropCols=[colName for colName in tempTable.columns if 'NetFrames' in colName]
+        tempTable=tempTable.drop(columns=dropCols)
+        tempTable=pd.melt(frame=tempTable,
+                        id_vars=[colName for colName in tempTable.columns if not ('N_' in colName)],
+                        var_name='di',value_name='nu')
+        tempTable.di=tempTable.di.map(lambda x: int(x.replace('N_','')))
+        if verbose:
+            print tempTable
+        outDataTable=tempTable
+
+        return(outDataTable)
