@@ -133,7 +133,7 @@ def compute_bin_vector(binInd,xIndSeries,
     #        the central bin or 0 otherwise
     binT=(1-binC[1:])*binC[:-1]*xVals[1:]
     
-    binVec=np.array(binC,dtype=int)
+    binVec=np.array(binC,dtype=int)*binVal
     binVec[1:]=binT+binVal*binC[1:]
     
     if giveBins | giveDeltaVal:
@@ -150,7 +150,7 @@ def compute_bin_vector(binInd,xIndSeries,
 
 def compute_reentry_vector(binInd,xIndSeries,
                            binSet=None,giveBins=False,
-                           giveDeltaVal=False):
+                           giveDeltaVal=False,verbose=False):
     if binSet is None:
         #transfrom binInd and xIndSeries such that the minimum observed value is 1
         seriesMin=np.min(xIndSeries)
@@ -170,14 +170,16 @@ def compute_reentry_vector(binInd,xIndSeries,
     binC=np.array(xVals==binVal)
     
     reentries=(1-binC[:-1])*binC[1:]*xVals[:-1]
-    binR=np.array(binC*binVal,dtype=int)
+    binR=np.array(binC,dtype=int)*binVal
     binR[:-1]=binR[:-1]+reentries
-    print(binR)
+    if verbose:
+        print('binR:',binR)
     
     binRuns=[list(g) for k,g in itertools.groupby(binR)]
 
     runPairs=[[run[0],len(run)] for run in binRuns]
-    print(runPairs)
+    if verbose:
+        print('runPairs:',runPairs)
     
     lastEscape=0
     reentriesList=[]
@@ -245,12 +247,175 @@ def compute_bin_escape_counts(binInd,xIndSeries,
     if giveDeltaVal:
         outDict['deltaVal']=deltaVal
     
-    return(outDict)    
+    return(outDict)
+
+def compute_reentry_counts(binInd,xIndSeries,
+                              binSet=None,
+                              giveBins=False,
+                              giveDeltaVal=False,
+                              giveReentryVec=False):
+    reentryVec,binningInfo=compute_reentry_vector(
+        binInd=binInd,xIndSeries=xIndSeries,binSet=binSet,giveBins=True,giveDeltaVal=True)
+    deltaVal=binningInfo['deltaVal']
+    bins=binningInfo['bins']
+    
+    rCounts=np.unique(reentryVec,return_counts=True)
+    
+    outDict={'count':np.sum(reentryVec>0),
+             'reentries':(rCounts[0][1:]-deltaVal,rCounts[1][1:])}
+    
+    if giveBins:
+        outDict['binSet']=bins
+    if giveReentryVec:
+        outDict['reentryVec']=reentryVec
+    if giveDeltaVal:
+        outDict['deltaVal']=deltaVal
+        
+    return(outDict)
+
+def extract_analysis_columns(milestoneData,windowColumn='Window',xIndexColumn='X_Index',
+                                      repColumn=None,groupingColumn=None):
+    extractionCols=[windowColumn,xIndexColumn]
+    simData=milestoneData[extractionCols]
+    
+    if groupingColumn is None:
+        groupingCol='Group'
+        simData[groupingCol]=0
+    else:
+        groupingCol=groupingColumn
+        simData[groupingCol]=milestoneData[groupingCol]
+        
+    if repColumn is None:
+        repCol='Rep'
+        simData[repCol]=0
+    else:
+        repCol=repColumn
+        simData[repCol]=milestoneData[repCol]
+    return(simData)
+
+def add_indexed_milestoning_analysis_columns(milestoneData,
+                                            windowColumn='Window',xIndexColumn='X_Index',
+                                            repColumn=None,groupingColumn=None,verbose=False,
+                                            verboseLevel=0):
+    simData=extract_analysis_columns(milestoneData,windowColumn,xIndexColumn,
+                                      repColumn,groupingColumn)
+    if groupingColumn is None:
+        groupingCol='Group'
+    else:
+        groupingCol=groupingColumn
+    if repColumn is None:
+        repCol='Rep'
+    else:
+        repCol=repColumn
+        
+    dataFrameList=[]
+    groupingGroups=simData.groupby(groupingCol)
+    for groupingGroup in groupingGroups:
+        groupingName=groupingGroup[0]
+        groupingData=groupingGroup[1]
+        if verbose:
+            print('--- --- --- Grouping Name:',groupingName,'--- --- ---')
+        windowGroups=groupingData.groupby(windowColumn)
+        binSet=np.sort(np.unique(np.concatenate([
+            groupingData[windowColumn].unique(),
+            groupingData[xIndexColumn].unique()
+        ])))
+        nBins=len(binSet)
+        deltaVal=1-np.min(binSet)
+        if verbose & (verboseLevel>0):
+            print('\tbinSet:',binSet,'; deltaVal:',deltaVal)
+        for windowGroup in windowGroups:
+            windowName=windowGroup[0]
+            windowData=windowGroup[1]
+            if verbose:
+                print('\t--- --- Window Name:',windowName,'--- ---')
+                print('\t\t--- Replica Name:',end=" ")
+            repGroups=windowData.groupby(repCol)
+            for repGroup in repGroups:
+                repName=repGroup[0]
+                repData=repGroup[1]
+                if verbose:
+                    print(repName,end=" ")
+                binVec=compute_bin_vector(
+                    binInd=windowName,xIndSeries=repData[xIndexColumn],
+                    binSet=binSet,giveBins=False,giveDeltaVal=False)
+                repData['Escape_Vector']=binVec-deltaVal
+                reentryVec=compute_reentry_vector(
+                    binInd=windowName,xIndSeries=repData[xIndexColumn],
+                    binSet=binSet,giveBins=False,
+                    giveDeltaVal=False,verbose=False)
+                repData['Reentry_Vector']=reentryVec-deltaVal
+                dataFrameList.append(repData.copy())
+                gc.collect()
+            if verbose:
+                print("---")
+                print('\t--- --- ------ --- ---')
+        if verbose:
+            print('--- --- --- ------ --- --- ---')
+    return(pd.concat(dataFrameList))
+
+def compute_analysis_group_pi_vector(groupDataFrame,windowColumn,binSet,
+                                     giveBins=False,giveBinMap=False,
+                                     giveEscapeMat=False,giveCounts=False,
+                                     giveCountsMat=False):
+    windowGroups=groupDataFrame.groupby(windowColumn)
+    binsSortArr=np.argsort(np.array(binSet))
+    sortedBinSet=binSet[binsSortArr]
+    bins=np.array(binSet[binsSortArr],dtype=int)
+    nBins=len(bins)
+    binMap={}
+    revBinMap=np.zeros(nBins)
+    for iBin,binName in enumerate(bins):
+        binMap[binName]=iBin
+        revBinMap[iBin]=sortedBinSet[iBin]
+    escapeMat=sp.sparse.lil_matrix((nBins,nBins),dtype=float)
+    countArray=np.zeros(nBins,dtype=int)
+    
+    if giveCountsMat:
+        countsMat=sp.sparse.lil_matrix((nBins,nBins),dtype=float)
+    
+    for windowGroup in windowGroups:
+        windowName=windowGroup[0]
+        iWin=binMap[windowName]
+        windowData=windowGroup[1]
+        eVec=np.array(windowData['Escape_Vector'],dtype=int)
+        eCounts=np.unique(eVec,return_counts=True)
+        for eBinName,eBinCount in zip(eCounts[0],eCounts[1]):
+            if eBinName in binMap:
+                iBin=binMap[eBinName]
+                if not(iBin==iWin):
+                    escapeMat[iWin,iBin]+=eBinCount
+                if giveCountsMat:
+                    countsMat[iWin,iBin]+=eBinCount
+                countArray[iWin]+=eBinCount
+        escapeMat[iWin,:]=escapeMat[iWin,:]/countArray[iWin]
+        escapeMat[iWin,iWin]=1-np.sum(escapeMat[iWin,:])
+    escapeEig=np.linalg.eig(escapeMat.todense().T)
+    si=np.argsort(1-escapeEig[0])
+    piVec=np.array(escapeEig[1])[:,si[0]]
+    piVec=piVec/np.sum(piVec)
+    
+    if giveEscapeMat | giveCounts | giveBins | giveBinMap:
+        outDataDict={'piVec':copy.deepcopy(piVec)}
+        if giveEscapeMat:
+            outDataDict['escapeMat']=copy.deepcopy(escapeMat)
+        if giveCounts:
+            outDataDict['counts']=copy.deepcopy(countArray)
+        if giveBins:
+            outDataDict['bins']=copy.deepcopy(bins)
+        if giveBinMap:
+            outDataDict['binMap']=copy.deepcopy(binMap)
+            outDataDict['revBinMap']=copy.deepcopy(revBinMap)
+        if giveCountsMat:
+            outDataDict['countsMat']=copy.deepcopy(countsMat)
+        return(outDataDict)
+    else:
+        return(copy.deepcopy(piVec))
     
 def analyze_indexed_milestoning_escapes(milestoneData,windowColumn='Window',xIndexColumn='X_Index',
                                       repColumn=None,groupingColumn=None,
                                       giveEscapeMats=False,giveCounts=False,
-                                      giveBins=False,giveBinMaps=False):
+                                      giveBins=False,giveBinMaps=False,giveCountsMat=False):
     extractionCols=[windowColumn,xIndexColumn]
     simData=milestoneData[extractionCols]
     
@@ -289,8 +454,11 @@ def analyze_indexed_milestoning_escapes(milestoneData,windowColumn='Window',xInd
         if giveBinMaps:
             groupDataDict['binMap']=copy.deepcopy(binMap)
         
-        escapeMat=sp.sparse.lil_matrix((nBins,nBins))
+        escapeMat=sp.sparse.lil_matrix((nBins,nBins),dtype=float)
         countArray=np.zeros(nBins,dtype=int)
+        
+        if giveCountsMat:
+            countsMat=sp.sparse.lil_matrix((nBins,nBins),dtype=float)
         
         groupWindows=groupData.groupby(windowColumn)
         for groupWindow in groupWindows:
@@ -307,11 +475,15 @@ def analyze_indexed_milestoning_escapes(milestoneData,windowColumn='Window',xInd
                       windowName,repData['X_Index'],
                       binSet=binSet)
                 countArray[iWin]+=repEscapeData['count']
+                if giveCountsMat:
+                    countsMat[iWin,iWin]+=repEscapeData['count']
                 for escapeBinName,escapeCount in \
                     zip(repEscapeData['escapes'][0],
                         repEscapeData['escapes'][1]):
                     iEscapeBin=binMap[escapeBinName]
                     escapeMat[iWin,iEscapeBin]+=escapeCount
+                    if giveCountsMat:
+                        countsMat[iWin,iEscapeBin]+=escapeCount
                 print('\t\tcount:',repEscapeData['count'],
                       'escapes:',repEscapeData['escapes'])
                 print("\t\t---")
@@ -327,6 +499,8 @@ def analyze_indexed_milestoning_escapes(milestoneData,windowColumn='Window',xInd
             groupDataDict['piVector']=copy.deepcopy(piVec)
             if giveCounts:
                 groupDataDict['counts']=copy.deepcopy(countArray)
+            if giveCountsMat:
+                groupDataDict['countsMat']=copy.deepcopy(countsMat)
         print("--- --- ---")
         #update output dictionary with current group's data
         outDataDict[groupName]=copy.deepcopy(groupDataDict)
