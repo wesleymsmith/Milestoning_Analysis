@@ -2,16 +2,428 @@ import numpy as np
 import scipy as sp
 import pandas as pd
 import itertools
+import copy
+import gc
 
-def analyze_milestone1D_data(dataTable,windowMins,windowMaxs,
+def parse_multi_indexed_milestone_data(dataTable,
+                                   window_index_columns,coordinate_index_columns,
+                                   replica_index_columns=None,join_str='_',
+                                   windowIndOneDname='wi_1D',
+                                   coordinateIndOneDname='ci_1D',
+                                   repIndName='Rep',
+                                   verbose=False):
+    #We first check to make sure that there are the same number of coordinate columns
+    #as data columns. As a word of warning, the window and coordinate index columns
+    #must also occur in the same order! I.e. the first column listed in the window
+    #index columns should correspond to the first column listed in the coordinate index
+    #columns.
+    if verbose:
+        print('Validating input data structure and extracting specified columns')
+    if len(window_index_columns) != len(coordinate_index_columns):
+        raise ValueError(
+            '''ERROR: the number of window index columns {lw} 
+               does not match the number of coordinate index columns {cw}'''.format(
+            lw=len(window_index_columns),cw=len(coordinate_index_columns)))
+    
+    datCols=np.concatenate([window_index_columns,coordinate_index_columns])
+    
+    #Next we extract the needed data subset from the data table provided, a preliminary
+    #check is made to ensure that the required columns are present.
+    #In the case that no replica index columns are indicated, they will be added to the
+    #data table under the assumption that all data is from a single replica
+    if replica_index_columns is None:
+        for colName in datCols:
+            if (not (colName in dataTable.columns)):
+                raise ValueError('''ERROR: The column {cn} is not present in the data!'''.format(
+                        colName))
+        tempData=dataTable[datCols]
+        tempData[repIndName]=1
+        replica_index_columns=[repIndName]
+        dataCols=simData.columns
+                                
+    else:
+        datCols=np.concatenate([datCols,replica_index_columns])
+        for colName in datCols:
+            if (not (colName in dataTable.columns)):
+                raise ValueError('''ERROR: The column {cn} is not present in the data!'''.format(
+                        colName))
+        tempData=dataTable[datCols]
+        if verbose:
+            print('Creating one dimensional replica index column')
+        tempData[repIndName]=tempData[replica_index_columns].apply(
+            lambda x: join_str.join(map(str,x)),axis=1)
+    
+    if verbose:
+        print('Creating stringified window index column')
+    tempData[windowIndOneDname+'_str']=tempData[window_index_columns].apply(
+        lambda x: join_str.join(map(str,x)),axis=1)
+    if verbose:
+        print('Creating stringified coordinate index column')
+    tempData[coordinateIndOneDname+'_str']=tempData[coordinate_index_columns].apply(
+        lambda x: join_str.join(map(str,x)),axis=1)
+    if verbose:
+        print('pruning data table')
+    tempData=tempData[[windowIndOneDname+'_str',repIndName,coordinateIndOneDname+'_str']]
+    if verbose:
+        print(tempData.head())
+            
+    if verbose:
+        print ('Generating indexing maps:')
+    #Next, window and coordinate index columns will be converted to a single index by concatenating
+    #their stringified values from each row and creating and taking the sorted array of unique
+    #single indices as a mapping from the one dimensional index (single index) to the original
+    #N-D index (where N is the number of window / coordinate columns)
+    #This array is then used to generate the N-D to one-D mapping in dictionary form where
+    #Doing this requires a joining string (sepecified using the 'join_str' argument). The default
+    #is an underscore... make sure this join string is not found in the entries of any coordinate
+    #or window indexing columns.
+    
+    #First we collect a list all unique observed coordinate and window indices for each column
+    if verbose:
+        print('-one dimensional index to N dimension indices map')
+    OneD_to_ND_map=tempData[windowIndOneDname+'_str'].sort_values().unique()
+    OneD_to_ND_map=np.unique(np.concatenate([
+        OneD_to_ND_map,
+        tempData[coordinateIndOneDname+'_str'].sort_values().unique()]))
+    
+    if verbose:
+        print('-N dimension indices to one dimensional index map')
+    ND_to_OneD_map={
+        entry:iEntry for iEntry,entry in enumerate(OneD_to_ND_map)
+    }
+    
+    if verbose:
+        print("mapping stringified window index to one dimensional integer index")
+    tempData[windowIndOneDname]=tempData[windowIndOneDname+'_str'].map(
+        lambda x: ND_to_OneD_map[x])
+    
+    if verbose:
+        print("mapping stringified coordinate index to one dimensional integer index")
+    tempData[coordinateIndOneDname]=tempData[coordinateIndOneDname+'_str'].map(
+        lambda x: ND_to_OneD_map[x])
+    
+    return {'OneD_to_ND_map':OneD_to_ND_map,
+            'ND_to_OneD_map':ND_to_OneD_map,
+            'parsed_data_frame':tempData,
+           }
+
+def compute_bin_vector(binInd,xIndSeries,
+                       binSet=None,giveBins=False,
+                       giveDeltaVal=False):
+    if binSet is None:
+        #transfrom binInd and xIndSeries such that the minimum observed value is 1
+        seriesMin=np.min(xIndSeries)
+        seriesMax=np.max(xIndSeries)
+        minVal=np.min([binInd,seriesMin])
+        maxVal=np.max([binInd,seriesMax])
+        bins=np.arange(minVal,maxVal+1)
+    else:
+        minVal=np.min(binSet)
+        bins=binSet
+    
+    deltaVal=1-minVal
+    
+    binVal=binInd+deltaVal
+    xVals=np.array(xIndSeries+deltaVal)
+    
+    #binC <- boolean array, true when xVals matches binVal
+    binC=np.array(xVals==binVal)
+    
+    #binT <- contains the value from xVals when xVals has just escaped from
+    #        the central bin or 0 otherwise
+    binT=(1-binC[1:])*binC[:-1]*xVals[1:]
+    
+    binVec=np.array(binC,dtype=int)
+    binVec[1:]=binT+binVal*binC[1:]
+    
+    if giveBins | giveDeltaVal:
+        outList=[binVec]
+        outData={}
+        if giveBins:
+            outData['bins']=bins
+        if giveDeltaVal:
+            outData['deltaVal']=deltaVal
+        outList.append(outData)
+        return(outList)
+    else:
+        return(binVec)
+
+def compute_reentry_vector(binInd,xIndSeries,
+                           binSet=None,giveBins=False,
+                           giveDeltaVal=False):
+    if binSet is None:
+        #transfrom binInd and xIndSeries such that the minimum observed value is 1
+        seriesMin=np.min(xIndSeries)
+        seriesMax=np.max(xIndSeries)
+        minVal=np.min([binInd,seriesMin])
+        maxVal=np.max([binInd,seriesMax])
+        bins=np.arange(minVal,maxVal+1)
+    else:
+        minVal=np.min(binSet)
+        bins=binSet
+    
+    deltaVal=1-minVal
+    
+    binVal=binInd+deltaVal
+    xVals=np.array(xIndSeries+deltaVal)
+    
+    binC=np.array(xVals==binVal)
+    
+    reentries=(1-binC[:-1])*binC[1:]*xVals[:-1]
+    binR=np.array(binC*binVal,dtype=int)
+    binR[:-1]=binR[:-1]+reentries
+    print(binR)
+    
+    binRuns=[list(g) for k,g in itertools.groupby(binR)]
+
+    runPairs=[[run[0],len(run)] for run in binRuns]
+    print(runPairs)
+    
+    lastEscape=0
+    reentriesList=[]
+    for runPair in runPairs:
+        if runPair[0]==0:
+            reentriesList.append([0]*runPair[1])
+        elif runPair[0]==binVal:
+            reentriesList.append([lastEscape]*runPair[1])
+        else:
+            lastEscape=runPair[0]
+            reentriesList.append([runPair[0]]*runPair[1])
+    reentryVec=np.concatenate(reentriesList)
+    
+    if giveBins | giveDeltaVal:
+        outList=[reentryVec]
+        outData={}
+        if giveBins:
+            outData['bins']=bins
+        if giveDeltaVal:
+            outData['deltaVal']=deltaVal
+        outList.append(outData)
+        return(outList)
+    else:
+        return(reentryVec)
+    
+def compute_bin_escape_counts(binInd,xIndSeries,
+                              binSet=None,
+                              giveBins=False,
+                              giveDeltaVal=False,
+                              giveBinVec=False,
+                              giveBinT=False):
+    '''
+        Takes as input a given bin index and a time series of x indices
+        (can be any iterable array).
+        Returns a count of how many times the x index was equal to the bin index
+        given along with each bin into which the x index was observed to escape to
+        and the number of times that escape was seen. This is returned as dictionary object
+        outputDict={
+            count:##totalCount##  <-- number of times x was in the given bin plus total numer of escape events
+            escapes:(observedEscapeBins,numberOfEscapesToObservedEscapeBin)
+        }
+        Note: binInd and xIndSeries should be integer valued. During processing they are transformed such that the
+        minimum observed value (over binInd and all xIndSeries data) is unity. This simplifies the algorithm somewhat.
+        However, the returned 'escapes' entry in the output will match the input series.
+    '''
+    
+    binVec,binningInfo=compute_bin_vector(
+        binInd=binInd,xIndSeries=xIndSeries,binSet=binSet,giveBins=True,giveDeltaVal=True)
+    deltaVal=binningInfo['deltaVal']
+    bins=binningInfo['bins']
+    
+    #tCounts <- the observed escape bins along with the number of times each of those bins was escaped into
+    centerBin=binInd+deltaVal
+    binT=(binVec*(1-(binVec==centerBin)))[1:]
+    tCounts=np.unique(binT,return_counts=True) #tuple (observedValues,numberOfTimesObserved)
+    
+    outDict={'count':np.sum(binVec>0),
+            'escapes':(tCounts[0][1:]-deltaVal,tCounts[1][1:])}
+    if giveBins:
+        outDict['binSet']=bins
+    if giveBinVec:
+        outDict['binVec']=binVec
+    if giveBinT:
+        outDict['binT']=binT
+    if giveDeltaVal:
+        outDict['deltaVal']=deltaVal
+    
+    return(outDict)    
+    
+def analyze_indexed_milestoning_escapes(milestoneData,windowColumn='Window',xIndexColumn='X_Index',
+                                      repColumn=None,groupingColumn=None,
+                                      giveEscapeMats=False,giveCounts=False,
+                                      giveBins=False,giveBinMaps=False):
+    extractionCols=[windowColumn,xIndexColumn]
+    simData=milestoneData[extractionCols]
+    
+    if groupingColumn is None:
+        groupingCol='Group'
+        simData[groupingCol]=0
+    else:
+        groupingCol=groupingColumn
+        simData[groupingCol]=milestoneData[groupingCol]
+        
+    if repColumn is None:
+        repCol='Rep'
+        simData[repCol]=0
+    else:
+        repCol=repColumn
+        simData[repCol]=milestoneData[repCol]
+        
+    simGroups=simData.groupby(groupingCol)
+    outDataDict={}
+    for simGroup in simGroups:
+        groupName=simGroup[0]
+        groupData=simGroup[1]
+        print("Group:",groupName)
+        groupDataDict={}
+        binSet=np.unique(np.concatenate([
+            groupData[windowColumn].unique(),
+            groupData[xIndexColumn].unique()
+        ]))
+        if giveBins:
+            groupDataDict['bins']=copy.deepcopy(binSet)
+        
+        nBins=len(binSet)
+        binMap={}
+        for iBin,binName in enumerate(binSet):
+            binMap[binName]=iBin
+        if giveBinMaps:
+            groupDataDict['binMap']=copy.deepcopy(binMap)
+        
+        escapeMat=sp.sparse.lil_matrix((nBins,nBins))
+        countArray=np.zeros(nBins,dtype=int)
+        
+        groupWindows=groupData.groupby(windowColumn)
+        for groupWindow in groupWindows:
+            windowName=groupWindow[0]
+            windowData=groupWindow[1]
+            iWin=binMap[windowName]
+            print("\tWindow:",windowName,"(iWin = ",iWin,")")
+            windowReps=windowData.groupby(repCol)
+            for windowRep in windowReps:
+                repName=windowRep[0]
+                repData=windowRep[1]
+                print("\t\tRep:",repName)
+                repEscapeData=compute_bin_escape_counts(
+                      windowName,repData['X_Index'],
+                      binSet=binSet)
+                countArray[iWin]+=repEscapeData['count']
+                for escapeBinName,escapeCount in \
+                    zip(repEscapeData['escapes'][0],
+                        repEscapeData['escapes'][1]):
+                    iEscapeBin=binMap[escapeBinName]
+                    escapeMat[iWin,iEscapeBin]+=escapeCount
+                print('\t\tcount:',repEscapeData['count'],
+                      'escapes:',repEscapeData['escapes'])
+                print("\t\t---")
+            escapeMat[iWin,:]=escapeMat[iWin,:]/countArray[iWin]
+            escapeMat[iWin,iWin]=1-np.sum(escapeMat[iWin,:])
+            print("\t--- ---")
+            if giveEscapeMats:
+                groupDataDict['escapeMatrix']=copy.deepcopy(escapeMat)
+            escapeEig=np.linalg.eig(escapeMat.todense().T)
+            si=np.argsort(1-escapeEig[0])
+            piVec=np.array(escapeEig[1])[:,si[0]]
+            piVec=piVec/np.sum(piVec)
+            groupDataDict['piVector']=copy.deepcopy(piVec)
+            if giveCounts:
+                groupDataDict['counts']=copy.deepcopy(countArray)
+        print("--- --- ---")
+        #update output dictionary with current group's data
+        outDataDict[groupName]=copy.deepcopy(groupDataDict)
+        gc.collect()
+    
+    return(outDataDict)
+    
+def gen_edge_ordering_maps(nBins):
+    tupleToIndex=np.zeros(shape=(nBins,nBins))
+    
+def compute_bin_crossing_counts(binInd,xIndSeries,
+                                edgeOrderingMaps=None,
+                                escapeData=None):
+    if (escapeData is None) | \
+        (not ('binC' in escapeData)):
+        escapeData=compute_bin_escape_counts(
+            binInd,xIndSeries,giveWorkingArrays=True)
+
+    deltaVal=escapeData['deltaVal']
+    binC=escapeData['binC']
+    binT=escapeData['binT']
+    escapes=escapeData['escapes']
+    bins=escapeData['binSet']
+    nBins=len(bins)
+    
+    xVals=(xIndSeries+deltaVal)
+    binVal=binInd+deltaVal
+    
+    
+    '''
+        Crossings are transitions from one edge (boundary) of a bin
+        to a different edge of that bin. Since the bins are potentially
+        N-Dimensional objects, a given bin may be in contact with many
+        other bins (potentially all other bins in the case of a very compact
+        binning setup). A bin edge may be denoted by the pair bins it lies between.
+        Similarly, then, a crossing is denoted by the pair of edges being traversed.
+        So just as there could be up to nBins^2 edges, there could be up to nEdges^2
+        crossings or equivalently, there could be up to nBins^4 possible crossings in
+        an nBin setup. If we were to store this in a dense array format, the space
+        requirements could very easily become intractible. Thus, we will store the
+        crossings in a sparse array format.
+        Likewise, we will need to generate mappings to map between tuple and index
+        notation for edges. 
+        As a note, these 'edges' are just boundaries between
+        pairs of bins so the ordering does not matter. E.g. edge(1,2)==edge(2,1).
+        Thus we will base our indexing such that the lower bin index is always the
+        first value of the pair.
+        On the other hand, the ordering of crossings DOES matter, so we must take
+        care to preserve ordering there.
+    '''
+    
+    if edgeOrderingMaps is None:
+        edgeTupleToIndex
+        
+
+def analyze_indexed_milestone_data(
+    dataTable,binCol='Window',xIndCol='X_Index',repCol=None):
+    '''
+    Warning: this algorithm will scale as N^4 in storage, where
+        N is the total number of milestoning bins.
+    '''
+    
+    eStr='%g_%g'
+    if repCol is None:
+        simData=dataTable[[binCol,xIndCol]].copy()
+        simData[repCol]=0
+    else:
+        simData=dataTable[[binCol,xIndCol,repCol]].copy()
+        
+    minBin_original=np.min([simData[binCol].min(),simData[xIndCol].min()])
+    maxBin_original=np.max([simData[binCol].max(),simData[xIndCol].max()])
+    nBins=maxBin-minBin
+    
+    binDelta=1-minBin
+    
+    simData[binCol]=simData[binCol]-binDelta
+    simData[xIndCol]=simData[xIndCol]-binDelta
+    
+    binExitMat=np.zeros(shape=(nBins,nBins))
+    
+    
+    
+    
+
+def analyze_milestone1D_data(dataTable,windowMins=None,windowMaxs=None,
                              useInds=False,verbose=False,multiReplica=False):
     #if "useInds" is set to true, the 'X_Index' column must be present in the data table
     #otherwise, if either useInds is false or there is no 'X_Index' column,
     #an 'X_Index' column is generated internally.
-    dataCols=["Window","Time","X"]
+    dataCols=["Window","Time"]
     if multiReplica:
         dataCols=np.concatenate([dataCols,["Rep"]])
     if not (useInds & ('X_Index' in dataTable)):
+        if (winMins is None) | (winMaxs is None) | (not ('X' in simData.columns)):
+            raise ValueError(
+                "Error:  winMins and winMaxs must be defined and X column must be present when X_Index is not provided!")
+        dataCols=np.concatenate([dataCols,['X']])
         #need to generate indexing data internally
         winMins=np.array(windowMins)
         winMaxs=np.array(windowMaxs)
@@ -25,7 +437,10 @@ def analyze_milestone1D_data(dataTable,windowMins,windowMaxs,
         simData=dataTable[dataCols]
     
     windows=np.sort(simData.Window.unique())
-    xbins=np.sort(simData.X_Index.unique())
+    #minWindow=np.min(windows)
+    #print('minWindow: ',minWindow)
+    #windows=windows-minWindow
+    xbins=np.sort(simData.X_Index.unique())#-minWindow
     nBins=len(xbins)
     nEdges=nBins-1
     escapeMat=np.zeros((nBins,nBins))
@@ -33,18 +448,21 @@ def analyze_milestone1D_data(dataTable,windowMins,windowMaxs,
     crossArray=np.zeros([nBins,2])
     tSum=0
     countsVec=np.zeros(nBins)
+    
+    #deltaInd=1-np.min(xbins)
+    #print('deltaInd: ',deltaInd)
     #iVal->escape matrix row index
     #xbin->window
     #cVal->place holder for bin index with indexing starting at 1
     for iVal,xbin in enumerate(xbins):
         if xbin in windows:
             if verbose:
-                print "--- --- ---"
+                print ("--- --- ---")
             winDat=simData[simData.Window==xbin]
             if not multiReplica:
                 tempDat=winDat
-                cVal=xbin+1
-                binVec=np.array(tempDat.X_Index+1)
+                cVal=xbin+1 #deltaInd
+                binVec=np.array(tempDat.X_Index+1) #+deltaInd-minWindow)
                 binC=(binVec==cVal)
                 binT=(1-binC[1:])*binC[:-1]*binVec[1:]
                 tCounts=np.unique(binT,return_counts=True)
@@ -91,11 +509,12 @@ def analyze_milestone1D_data(dataTable,windowMins,windowMaxs,
                 crossArray[iVal,1]=crossArray[iVal,1]+np.sum(crossings==-1)
             else:
                 if verbose:
-                    print "working on replica:",
+                    print ("working on replica:",end=" ")
                 for rep in winDat.Rep.unique():
                     if verbose:
-                         print rep,
+                         print (rep,end=" ")
                     tempDat=winDat[winDat.Rep==rep]
+                    deltaInd=1-tempDat['X_Index'].min()
                     cVal=xbin+1
                     binVec=np.array(tempDat.X_Index+1)
                     binC=(binVec==cVal)
@@ -120,14 +539,14 @@ def analyze_milestone1D_data(dataTable,windowMins,windowMaxs,
                     crossArray[iVal,0]=crossArray[iVal,0]+np.sum(crossings==1)
                     crossArray[iVal,1]=crossArray[iVal,1]+np.sum(crossings==-1)
                     if verbose:
-                        print ""
+                        print ("")
             if verbose:
-                print "escapeMatrix entry for window %g:"%xbin
-                print '['+', '.join(map(lambda x: '%.5f'%x,escapeMat[iVal,:]))+']'
-                print "Number of crossings (left-to-right,right-to-left):",
-                print "(%g,%g)"%(crossArray[iVal,0],crossArray[iVal,1])
+                print ("escapeMatrix entry for window %g:"%xbin)
+                print ('['+', '.join(map(lambda x: '%.5f'%x,escapeMat[iVal,:]))+']')
+                print ("Number of crossings (left-to-right,right-to-left):",end=" ")
+                print ("(%g,%g)"%(crossArray[iVal,0],crossArray[iVal,1]))
     if verbose:
-        print "--- --- ---"
+        print ("--- --- ---")
         
     tSum=np.sum(countsVec)
     Emat=np.matrix(escapeMat)
@@ -138,8 +557,8 @@ def analyze_milestone1D_data(dataTable,windowMins,windowMaxs,
     outEig=np.linalg.eig(Amat.T)
     si=np.argsort(1-outEig[0])
     if verbose:
-        print 'Eigenvalues:',
-        print outEig[0][si]
+        print ('Eigenvalues:',end=" ")
+        print (outEig[0][si])
     piVec=np.array(outEig[1])[:,si[0]]
     piVec=piVec/np.sum(piVec)
     
@@ -162,17 +581,27 @@ def analyze_milestone1D_data(dataTable,windowMins,windowMaxs,
         jj=nEdges-ii
         NijMat[jj,jj-1]=piVec[jj]*crossArray[jj,1]/countsVec[jj]
     Qmat=np.zeros([nBins,nBins])
+    print('init: Qmat.shape: ',Qmat.shape)
+    print('CountsVec: ',countsVec)
+    print('EscapeMat: ',escapeMat)
+    print('piVec: ',piVec)
+    print('NijMat: ',NijMat)
+    print('Ri: ',Ri)
     for iRow in np.arange(0,nEdges-1):
         Qmat[iRow,iRow+1]=NijMat[iRow,iRow+1]/Ri[iRow]
         Qmat[iRow+1,iRow]=NijMat[iRow+1,iRow]/Ri[iRow+1]
-        
+    print('addElements: Qmat.shape: ',Qmat.shape)
+    print (Qmat)
     Qrows=np.nonzero(np.sum(Qmat,axis=1)>0)[0]
     Qmat=Qmat[Qrows[:,None],Qrows]
+    print('remove empty row/col: Qmat.shape: ',Qmat.shape)
     
     for iRow,row in enumerate(Qmat):
         Qmat[iRow,iRow]=-np.sum(row)
+    print('update diag.: Qmat.shape: ',Qmat.shape)
     
     bVec=np.zeros(nEdges)-1
+    print('Qmat.shape: ',Qmat.shape,', bVec.shape: ',bVec.shape)
     tauVec=sp.linalg.lstsq(Qmat,bVec)
     
     return (escapeMat,piVec,rMat,crossArray,countsVec,Ri,NijMat,Qmat,Qrows,tauVec)
@@ -218,8 +647,8 @@ def compute_escape_matrix_row_convergence(windowID,windowIndexData,
                 outTable["N"]=np.cumsum(binT==binInd)
             outDataTables.append(outTable.copy())
             if verbose:
-                print 'window %g, rep %s, di %g, N %g'%(
-                    windowC-dInd, rep, binInd-windowC,outTable.N.max())
+                print ('window %g, rep %s, di %g, N %g'%(
+                    windowC-dInd, rep, binInd-windowC,outTable.N.max()))
             
     outDataTable=pd.concat(outDataTables)
     tempTable=outDataTable
@@ -228,8 +657,8 @@ def compute_escape_matrix_row_convergence(windowID,windowIndexData,
         return outDataTable
     else:
         if verbose:
-            print tempTable.head()
-            print '--- --- ---'
+            print (tempTable.head())
+            print ('--- --- ---')
         testAggTab=tempTable.groupby(
             ['Frame','i','di']).agg(
             {'N':np.sum,'NetFrames':np.sum}).reset_index().sort_values(
@@ -237,8 +666,8 @@ def compute_escape_matrix_row_convergence(windowID,windowIndexData,
         testAggTab['Rep']='Mean'
         testAggTab=testAggTab[tempTable.columns]
         if verbose:
-            print testAggTab.head()
-            print '--- --- ---'
+            print (testAggTab.head())
+            print ('--- --- ---')
         tempTable=pd.concat([tempTable,testAggTab])
         tempTable=pd.pivot_table(index=['Frame','Rep','i'],
                                columns='di',values=['N','NetFrames'],
@@ -246,8 +675,8 @@ def compute_escape_matrix_row_convergence(windowID,windowIndexData,
         tempTable.columns=tempTable.columns.map(lambda x: '_'.join([str(xv) for xv in x]))
         tempTable=tempTable.reset_index()
         if verbose:
-            print tempTable.head()
-            print '--- --- ---'
+            print (tempTable.head())
+            print ('--- --- ---')
         niCols=[colName for colName in tempTable.columns if 'N_' in colName]
         for niCol in niCols:
             if niCol !='N_0':
@@ -260,7 +689,7 @@ def compute_escape_matrix_row_convergence(windowID,windowIndexData,
                         var_name='di',value_name='nu')
         tempTable.di=tempTable.di.map(lambda x: int(x.replace('N_','')))
         if verbose:
-            print tempTable
+            print (tempTable)
         outDataTable=tempTable
 
         return(outDataTable)
