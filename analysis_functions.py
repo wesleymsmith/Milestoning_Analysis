@@ -273,6 +273,103 @@ def compute_reentry_counts(binInd,xIndSeries,
         
     return(outDict)
 
+def build_bin_mappings(binSet):
+    binSortArr=np.argsort(binSet)
+    bins=binSet[binSortArr]
+    binMap={}
+    binSetMap={}
+    for iBin,binName in enumerate(bins):
+        binMap[binName]=iBin
+        binSetMap[binName]=binSortArr[iBin]
+    return({'bins':bins,
+            'binSortArr':binSortArr,
+            'binMap':binMap,
+            'binSetMap':binSetMap})
+
+def build_edge_mappings(nBins):
+    '''maps between pairs of bin indices and edge indices
+         the first bin index in the pair must be the
+         smallest of the two. Wrapper function are used 
+         to enforce this convention'''
+    ePairToIndMap=np.zeros((nBins,nBins))-1
+    for ii in np.arange(nBins-1):
+        for jj in np.arange(ii+1,nBins):
+            ePairToIndMap[ii,jj]=ii+(nBins-1)*(jj-1)
+    tempInds=np.nonzero(ePairToIndMap>-1)
+    eIndToPairMap=np.array([
+        [iPair[0],iPair[1]] for iPair in \
+        zip(tempInds[0],tempInds[1])
+    ])
+    nEdges=len(tempInds[0])
+    return({'edgeIndToPair':eIndToPairMap,
+            'edgePairToInd':ePairToIndMap,
+            'nEdges':nEdges})
+
+def compute_bin_edge_transitions(binInd,escapeVec,reentryVec,binSet,
+                             edgeMaps=None,giveBins=False,giveBinMap=False,
+                             giveEdgeMaps=False):
+    '''
+        Returns Nij_alpha and Ri_alpha based on the escape vector and reentry vector given.
+        These are assumed to be given in terms of the bins contained in "binSet"
+        and in areas where the index in not either escaping, reentering or inside
+        the main bin (binInd) the value will be one less than the minimum value
+        inside "binSet".
+        Internally, binSet gets mapped to bins indexed from 0 to nBins
+        Note that binInd, escapeVec, and reentryVec should be in terms of the bins in "binSet",
+        Nij_alpha and Ri_alpha are in terms of the edges between these bins.
+        To remain general, a bin may have more than multiple bins adjacent to it
+        and thus could have many edges. We thus will create mappings to map between
+        bin edges denoted as pairs of bins and bin edges with a single indexing value.
+        The latter notation enables storing Nij in a 2D matrix format. This allows us
+        to build this matrix by summing Nij matrices from each window.
+        Edges between bins can be donoted either using the pair of bins which the edge
+        divides or as an absolute 1D index. Since these edges are non-directional
+        we here adopt the convention that edge pairs will always list the bin with the
+        lowest index as the first value of the pair (see "build_edge_mappings" function).
+    '''
+    binMappingDict=build_bin_mappings(binSet)
+    binSortArr=binMappingDict['binSortArr']
+    bins=binMappingDict['bins']
+    binMap=binMappingDict['binMap']
+    binSetMap=binMappingDict['binSetMap']
+    
+    nBins=len(bins)
+    deltaVal=1-np.min(bins)
+    
+    binVal=binMap[binInd]
+    
+    if (edgeMaps is None) | \
+       (not ('edgeIndToPair' in edgeMaps)) | \
+       (not ('edgePairToInd' in edgeMaps)):
+        edgeMappingInfo=build_edge_mappings(nBins)
+    else:
+        edgeMappingInfo=edgeMaps
+        
+    eIndToPairMap=edgeMappingInfo['edgeIndToPair']
+    ePairToIndMap=edgeMappingInfo['edgePairToInd']
+    ePairFun=lambda ii,jj: ePairToIndMap[np.min([ii,jj]),np.max([ii,jj])]
+    eIndFun=lambda eInd: eIndToPairMap[eInd] if ((eInd>=0) & (eInd<len(eIndToPairMap))) else [-1,-1]
+    
+    Nij_mat=sp.sparse.lil_matrix((nEdges,nEdges))
+    Ri_mat=sp.sparse.lil_matrix((nBins,nBins))
+    
+    Rtemp=np.unique(reentryVec,return_counts=True)
+    for Rentry in zip(Rtemp[0],Rtemp[1]):
+        if Rentry[0] in binMap:
+            ri=binMap[Rtemp[0]]
+            Ri_mat[binVal,ri]+=Rentry[1]
+    
+    #need to get how many times bin i was escaped to after
+    #last being in bin j
+    #essentially this amounts to comparing entries from
+    #escapeVec from 1 and greater with entries from
+    #
+    eVec=escapeVec[1:]
+    eMask=1-(eVec==binInd)*np.isin(eVec,binSet)
+    eVec=eVec[eMask]
+    rVec=reentryVec[:-1]
+    rVec=rVec[eMask]
+        
 def extract_analysis_columns(milestoneData,windowColumn='Window',xIndexColumn='X_Index',
                                       repColumn=None,groupingColumn=None):
     extractionCols=[windowColumn,xIndexColumn]
