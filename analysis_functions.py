@@ -291,10 +291,10 @@ def build_edge_mappings(nBins):
          the first bin index in the pair must be the
          smallest of the two. Wrapper function are used 
          to enforce this convention'''
-    ePairToIndMap=np.zeros((nBins,nBins))-1
+    ePairToIndMap=np.zeros((nBins,nBins),dtype=int)-1
     for ii in np.arange(nBins-1):
         for jj in np.arange(ii+1,nBins):
-            ePairToIndMap[ii,jj]=ii+(nBins-1)*(jj-1)
+            ePairToIndMap[ii,jj]=int((ii)*((nBins)+(nBins-ii-1))/2)+jj-ii-1
     tempInds=np.nonzero(ePairToIndMap>-1)
     eIndToPairMap=np.array([
         [iPair[0],iPair[1]] for iPair in \
@@ -307,7 +307,7 @@ def build_edge_mappings(nBins):
 
 def compute_bin_edge_transitions(binInd,escapeVec,reentryVec,binSet,
                              edgeMaps=None,giveBins=False,giveBinMap=False,
-                             giveEdgeMaps=False):
+                             giveEdgeMaps=False,verbose=False):
     '''
         Returns Nij_alpha and Ri_alpha based on the escape vector and reentry vector given.
         These are assumed to be given in terms of the bins contained in "binSet"
@@ -347,6 +347,7 @@ def compute_bin_edge_transitions(binInd,escapeVec,reentryVec,binSet,
         
     eIndToPairMap=edgeMappingInfo['edgeIndToPair']
     ePairToIndMap=edgeMappingInfo['edgePairToInd']
+    nEdges=len(eIndToPairMap)
     ePairFun=lambda ii,jj: ePairToIndMap[np.min([ii,jj]),np.max([ii,jj])]
     eIndFun=lambda eInd: eIndToPairMap[eInd] if ((eInd>=0) & (eInd<len(eIndToPairMap))) else [-1,-1]
     
@@ -356,21 +357,61 @@ def compute_bin_edge_transitions(binInd,escapeVec,reentryVec,binSet,
     Rtemp=np.unique(reentryVec,return_counts=True)
     for Rentry in zip(Rtemp[0],Rtemp[1]):
         if Rentry[0] in binMap:
-            ri=binMap[Rtemp[0]]
+            ri=binMap[Rentry[0]]
             Ri_mat[binVal,ri]+=Rentry[1]
+    
+    center_count=np.sum(escapeVec==binInd)
     
     #need to get how many times bin i was escaped to after
     #last being in bin j
     #essentially this amounts to comparing entries from
     #escapeVec from 1 and greater with entries from
     #
-    eVec=escapeVec[1:]
-    eMask=1-(eVec==binInd)*np.isin(eVec,binSet)
-    eVec=eVec[eMask]
-    rVec=reentryVec[:-1]
-    rVec=rVec[eMask]
+    eMask=np.array(
+        (1-(escapeVec==binInd))*np.isin(escapeVec,binSet),
+        dtype=bool)
+    eVec=escapeVec[eMask]
+    rVec=reentryVec[eMask]
+    rMask=np.array(
+        (1-(rVec==binInd))*np.isin(rVec,binSet),
+        dtype=bool)
+    eVec=eVec[rMask]
+    rVec=rVec[rMask]
+    pMask=np.array(np.abs(eVec-rVec)>0,
+                   dtype=bool)
+    eVec=eVec[pMask]
+    rVec=rVec[pMask]
+    
+    if verbose:
+        print('num transition entries:',np.sum(pMask))
+    for tPair in zip(rVec,eVec):
+        if (tPair[0] in binMap) & (tPair[1] in binMap):
+            ei=ePairFun(binVal,binMap[tPair[0]])
+            ej=ePairFun(binVal,binMap[tPair[1]])
+            if np.isfinite(ei) & np.isfinite(ej) & \
+                (ei > -1) & (ej > -1) & \
+                (not (ei==ej)):
+                Nij_mat[ei,ej]+=1
+    
+    outDict={
+        'Ri_counts':Ri_mat,
+        'Nij_counts':Nij_mat,
+        'center_count':center_count
+    }
+    
+    #giveBins=False,giveBinMap=False,giveEdgeMaps=False
+    if giveBins:
+        outDict['bins']=bins
+    if giveBinMap:
+        outDict['binMap']=binMap
+        outDict['binSetMap']=binSetMap
+    if giveEdgeMaps:
+        outDict['edgeIndToPair']=eIndToPairMap
+        outDict['edgePairToInd']=ePairToIndMap
         
-def extract_analysis_columns(milestoneData,windowColumn='Window',xIndexColumn='X_Index',
+    return(outDict)
+    
+def extract_analysis_columns(milestoneData,windowColumn='Window',xIndexColumn='X_Index',frameCol='Frame',
                                       repColumn=None,groupingColumn=None):
     extractionCols=[windowColumn,xIndexColumn]
     simData=milestoneData[extractionCols]
@@ -388,13 +429,19 @@ def extract_analysis_columns(milestoneData,windowColumn='Window',xIndexColumn='X
     else:
         repCol=repColumn
         simData[repCol]=milestoneData[repCol]
+    
+    if frameCol in milestoneData:
+        simData[frameCol]=milestoneData[frameCol]
+    else:
+        simData[frameCol]=np.arange(len(simData))
+    
     return(simData)
 
 def add_indexed_milestoning_analysis_columns(milestoneData,
-                                            windowColumn='Window',xIndexColumn='X_Index',
+                                            windowColumn='Window',xIndexColumn='X_Index',frameCol='Frame',
                                             repColumn=None,groupingColumn=None,verbose=False,
                                             verboseLevel=0):
-    simData=extract_analysis_columns(milestoneData,windowColumn,xIndexColumn,
+    simData=extract_analysis_columns(milestoneData,windowColumn,xIndexColumn,frameCol,
                                       repColumn,groupingColumn)
     if groupingColumn is None:
         groupingCol='Group'
@@ -404,6 +451,7 @@ def add_indexed_milestoning_analysis_columns(milestoneData,
         repCol='Rep'
     else:
         repCol=repColumn
+    
         
     dataFrameList=[]
     groupingGroups=simData.groupby(groupingCol)
@@ -456,15 +504,19 @@ def compute_analysis_group_pi_vector(groupDataFrame,windowColumn,binSet,
                                      giveEscapeMat=False,giveCounts=False,
                                      giveCountsMat=False):
     windowGroups=groupDataFrame.groupby(windowColumn)
-    binsSortArr=np.argsort(np.array(binSet))
-    sortedBinSet=binSet[binsSortArr]
-    bins=np.array(binSet[binsSortArr],dtype=int)
+    
+    binMappingDict=build_bin_mappings(binSet)
+    binSortArr=binMappingDict['binSortArr']
+    bins=binMappingDict['bins']
+    binMap=binMappingDict['binMap']
+    binSetMap=binMappingDict['binSetMap']
+    
     nBins=len(bins)
-    binMap={}
-    revBinMap=np.zeros(nBins)
-    for iBin,binName in enumerate(bins):
-        binMap[binName]=iBin
-        revBinMap[iBin]=sortedBinSet[iBin]
+    deltaVal=1-np.min(bins)
+
+    nBins=len(bins)
+    revBinMap=binSetMap
+    
     escapeMat=sp.sparse.lil_matrix((nBins,nBins),dtype=float)
     countArray=np.zeros(nBins,dtype=int)
     
@@ -502,13 +554,78 @@ def compute_analysis_group_pi_vector(groupDataFrame,windowColumn,binSet,
             outDataDict['bins']=copy.deepcopy(bins)
         if giveBinMap:
             outDataDict['binMap']=copy.deepcopy(binMap)
-            outDataDict['revBinMap']=copy.deepcopy(revBinMap)
+            outDataDict['binSetMap']=copy.deepcopy(binSetMap)
         if giveCountsMat:
             outDataDict['countsMat']=copy.deepcopy(countsMat)
         return(outDataDict)
     else:
         return(copy.deepcopy(piVec))
     
+def compute_analysis_group_Qdata(groupDataFrame,windowColumn,binSet,
+                                     repColumn='Rep',
+                                     giveBins=False,giveBinMap=False,
+                                     giveEscapeMat=False,giveCounts=False,
+                                     giveCountsMat=False,giveEdgeMap=False):
+    
+    piDataDict=compute_analysis_group_pi_vector(groupDataFrame,windowColumn,binSet,
+                                     giveBins=True,giveBinMap=True,
+                                     giveEscapeMat=True,giveCounts=True,
+                                     giveCountsMat=True)
+    bins=piDataDict['bins']
+    binMap=piDataDict['binMap']
+    binSetMap=piDataDict['binSetMap']
+    countsVec=piDataDict['counts']
+    escapeMat=piDataDict['countsMat']
+    
+    nBins=len(bins)
+    
+    edgeInfo=build_edge_mappings(nBins)
+    nEdges=len(edgeInfo['edgeIndToPair'])
+    #print(edgeInfo)
+    #print(nEdges)
+    
+    windowGroups=groupDataFrame.groupby(windowColumn)
+    
+    
+        
+    piData=compute_analysis_group_pi_vector(
+        groupDataFrame,windowColumn,binSet,
+        giveBins=False,giveBinMap=False,
+        giveEscapeMat=False,giveCounts=True,
+        giveCountsMat=True)
+    
+    piVec=piData['piVec']
+    countVec=piData['counts']
+    Tcount=np.sum(countVec/piVec)
+   
+    
+    Rmat=sp.sparse.lil_matrix((nBins,nBins))
+    Nmat=sp.sparse.lil_matrix((nEdges,nEdges))
+    print('Computing R and N:',end=" ")
+    for windowGroup in windowGroups:
+        repGroups=windowGroup[1].groupby(repColumn)
+        print("(",windowGroup[0],':',end=" ")
+        for repGroup in repGroups:
+            print(repGroup[0],end=" ")
+            transitionData=compute_bin_edge_transitions(
+                binInd=windowGroup[0],
+                escapeVec=np.array(repGroup[1]['Escape_Vector'])[1:],
+                reentryVec=np.array(repGroup[1]['Reentry_Vector'])[:-1],
+                binSet=binSet,
+                edgeMaps=edgeInfo,giveBins=False,giveBinMap=False,
+                giveEdgeMaps=False,verbose=False)
+            iBin=binMap[windowGroup[0]]
+            #print('Nmat shape:',Nmat.shape)
+            #print('Nij_counts shape:',transitionData['Nij_counts'].shape)
+            Rmat=Rmat+transitionData['Ri_counts']*piVec[iBin]/countVec[iBin]
+            Nmat=Nmat+transitionData['Nij_counts']*piVec[iBin]/countVec[iBin]
+        print(")",end=" ")
+    print("")
+    outDict={
+        'Rmat':Rmat,
+        'Nmat':Nmat}
+    return(outDict)
+            
 def analyze_indexed_milestoning_escapes(milestoneData,windowColumn='Window',xIndexColumn='X_Index',
                                       repColumn=None,groupingColumn=None,
                                       giveEscapeMats=False,giveCounts=False,
