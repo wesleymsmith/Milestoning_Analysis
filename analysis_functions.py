@@ -534,9 +534,10 @@ def compute_analysis_group_pi_vector(groupDataFrame,windowColumn,binSet,
                 iBin=binMap[eBinName]
                 if not(iBin==iWin):
                     escapeMat[iWin,iBin]+=eBinCount
+                else:    
+                    countArray[iWin]+=eBinCount
                 if giveCountsMat:
                     countsMat[iWin,iBin]+=eBinCount
-                countArray[iWin]+=eBinCount
         escapeMat[iWin,:]=escapeMat[iWin,:]/countArray[iWin]
         escapeMat[iWin,iWin]=1-np.sum(escapeMat[iWin,:])
     escapeEig=np.linalg.eig(escapeMat.todense().T)
@@ -562,7 +563,7 @@ def compute_analysis_group_pi_vector(groupDataFrame,windowColumn,binSet,
         return(copy.deepcopy(piVec))
     
 def compute_analysis_group_Qdata(groupDataFrame,windowColumn,binSet,
-                                     repColumn='Rep',
+                                     repColumn='Rep',givePiVec=True,
                                      giveBins=False,giveBinMap=False,
                                      giveEscapeMat=False,giveCounts=False,
                                      giveCountsMat=False,giveEdgeMap=False):
@@ -584,6 +585,9 @@ def compute_analysis_group_Qdata(groupDataFrame,windowColumn,binSet,
     #print(edgeInfo)
     #print(nEdges)
     
+    eIndToPair=edgeInfo['edgeIndToPair']
+    ePairToInd=edgeInfo['edgePairToInd']
+    
     windowGroups=groupDataFrame.groupby(windowColumn)
     
     
@@ -596,7 +600,7 @@ def compute_analysis_group_Qdata(groupDataFrame,windowColumn,binSet,
     
     piVec=piData['piVec']
     countVec=piData['counts']
-    Tcount=np.sum(countVec/piVec)
+    Tcount=np.sum(piVec/countVec)**-1
    
     
     Rmat=sp.sparse.lil_matrix((nBins,nBins))
@@ -626,6 +630,53 @@ def compute_analysis_group_Qdata(groupDataFrame,windowColumn,binSet,
     outDict={
         'Rmat':Rmat,
         'Nmat':Nmat}
+    if givePiVec:
+        outDict['piVec']=piVec
+
+    Ri_vec=np.zeros(nEdges)
+    Rpairs=np.nonzero(Rmat)
+    for Rpair in zip(Rpairs[0],Rpairs[1]):
+        Redge=ePairToInd[np.min(Rpair),np.max(Rpair)]
+        Ri_vec[Redge]+=Rmat[Rpair[0],Rpair[1]]
+    Qmat=sp.sparse.lil_matrix((nEdges,nEdges))
+    for Redge in np.nonzero(Ri_vec)[0]:
+        Qmat[Redge,:]=Nmat[Redge,:]/Ri_vec[Redge]
+    
+    outDict['Qmat']=Qmat
+    
+    Qlap=copy.deepcopy(Qmat)
+    for iRow,rowVec in enumerate(Qlap):
+        Qlap[iRow,iRow]=-np.sum(rowVec)
+        
+    nNodes=len(bins)
+    Qtargets=np.array([
+        Qrow for Qrow in np.nonzero(np.sum(Qmat,axis=1)>0)[0] \
+        if (not ((nNodes-1) in eIndToPair[Qrow]))
+    ])
+    
+    QlapRed=Qlap.todense()[Qtargets[:,None],Qtargets]
+    
+    outDict['Qhat']=QlapRed
+    
+    bvec=np.zeros(len(QlapRed))-1
+    
+    tauVecData=sp.linalg.lstsq(QlapRed,bvec)
+    tauVec=tauVecData[0]
+    
+    outDict['tauData']=tauVecData
+    
+    pairStr='{:g}_{:g}'
+    tauDict={}
+    for iTau,tau in enumerate(tauVec):
+        binPair=eIndToPair[Qtargets[iTau]]
+        print(binPair)
+        binPairStr=pairStr.format(binPair[0],binPair[1])
+        if binPairStr in tauDict:
+            tauDict[binPairStr]=np.min([tauDict[binPairStr],tau])
+        else:
+            tauDict[binPairStr]=tau
+    outDict['tauDict']=tauDict
+    
     return(outDict)
             
 def analyze_indexed_milestoning_escapes(milestoneData,windowColumn='Window',xIndexColumn='X_Index',
