@@ -621,6 +621,8 @@ def compute_analysis_group_Qdata(groupDataFrame,windowColumn,binSet,
             Nmat=Nmat+transitionData['Nij_counts']*piVec[iBin]/countVec[iBin]
         print(")",end=" ")
     print("")
+    Rmat=Tcount*Rmat
+    Nmat=Tcount*Nmat
     outDict={
         'Rmat':Rmat,
         'Nmat':Nmat}
