@@ -562,6 +562,37 @@ def compute_analysis_group_pi_vector(groupDataFrame,windowColumn,binSet,
     else:
         return(copy.deepcopy(piVec))
     
+def filter_matRow_entries(mat,giveEntryMap=True,
+                             matRowAggTestFun=lambda xMat:np.sum(np.abs(xMat),axis=1)>0,
+                             rowIndTestFun=lambda iRow: True):
+    targets=np.array([
+        iRow for iRow in np.nonzero(matRowAggTestFun(mat))[0] \
+        if rowIndTestFun(iRow)
+    ])
+    
+    matRed=mat[targets[:,None],targets]
+    if giveEntryMap:
+        return((matRed,targets))
+    else:
+        return(matRed)
+    
+def get_tau(qhat,entryMap,indToPairMap):
+    bvec=np.zeros(len(qhat))-1
+    tauData=np.linalg.lstsq(qhat,bvec,rcond=None)
+    tauVec=tauData[0]
+    
+    pairStr='{:g}_{:g}'
+    tauDict={}
+    for iTau,tau in enumerate(tauVec):
+        binPair=indToPairMap[entryMap[iTau]]
+        print(binPair)
+        binPairStr=pairStr.format(binPair[0],binPair[1])
+        if binPairStr in tauDict:
+            tauDict[binPairStr]=np.min([tauDict[binPairStr],tau])
+        else:
+            tauDict[binPairStr]=tau
+    return((tauDict,tauVec,tauData))
+    
 def compute_analysis_group_Qdata(groupDataFrame,windowColumn,binSet,
                                      repColumn='Rep',givePiVec=True,
                                      giveBins=False,giveBinMap=False,
@@ -649,32 +680,25 @@ def compute_analysis_group_Qdata(groupDataFrame,windowColumn,binSet,
         Qlap[iRow,iRow]=-np.sum(rowVec)
         
     nNodes=len(bins)
-    Qtargets=np.array([
-        Qrow for Qrow in np.nonzero(np.sum(Qmat,axis=1)>0)[0] \
-        if (not ((nNodes-1) in eIndToPair[Qrow]))
-    ])
     
-    QlapRed=Qlap.todense()[Qtargets[:,None],Qtargets]
+    rowAggTest=lambda tMat: np.sum(np.abs(tMat),axis=1)>0
+    indCheckFun=lambda iRow: True
+    #indCheckFun=lambda iRow: not ((nNodes-1) in eIndToPair[iRow])
+    QlapRed,Qtargets=filter_matRow_entries(
+        Qlap,giveEntryMap=True,
+        matRowAggTestFun=rowAggTest,rowIndTestFun=indCheckFun)
+    
+    QlapRed=QlapRed.todense()
     
     outDict['Qhat']=QlapRed
     
     bvec=np.zeros(len(QlapRed))-1
     
-    tauVecData=sp.linalg.lstsq(QlapRed,bvec)
-    tauVec=tauVecData[0]
+    tauDict,tauVec,tauVecData=get_tau(
+        qhat=QlapRed,entryMap=Qtargets,indToPairMap=eIndToPair)
     
     outDict['tauData']=tauVecData
-    
-    pairStr='{:g}_{:g}'
-    tauDict={}
-    for iTau,tau in enumerate(tauVec):
-        binPair=eIndToPair[Qtargets[iTau]]
-        print(binPair)
-        binPairStr=pairStr.format(binPair[0],binPair[1])
-        if binPairStr in tauDict:
-            tauDict[binPairStr]=np.min([tauDict[binPairStr],tau])
-        else:
-            tauDict[binPairStr]=tau
+    outDict['tauVec']=tauVec
     outDict['tauDict']=tauDict
     
     return(outDict)
