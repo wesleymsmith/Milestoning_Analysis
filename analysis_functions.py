@@ -1,9 +1,12 @@
+from __future__ import print_function
 import numpy as np
 import scipy as sp
 import pandas as pd
 import itertools
 import copy
 import gc
+import sklearn as skl
+from sklearn.utils import resample
 
 def parse_multi_indexed_milestone_data(dataTable,
                                    window_index_columns,coordinate_index_columns,
@@ -489,6 +492,8 @@ def add_indexed_milestoning_analysis_columns(milestoneData,
                     binInd=windowName,xIndSeries=repData[xIndexColumn],
                     binSet=binSet,giveBins=False,
                     giveDeltaVal=False,verbose=False)
+                reentryVec[1:]=reentryVec[:-1] #shift forward to align to escape vector
+                reentryVec[0]=0
                 repData['Reentry_Vector']=reentryVec-deltaVal
                 dataFrameList.append(repData.copy())
                 gc.collect()
@@ -499,6 +504,44 @@ def add_indexed_milestoning_analysis_columns(milestoneData,
             print('--- --- --- ------ --- --- ---')
     return(pd.concat(dataFrameList))
 
+def bootstrap_analysis_group_pi_vector(groupDataFrame,windowColumn,binSet,
+                                       bootSampleSize,nBootSamples,repColumn=None,
+                                         giveBins=False,giveBinMap=False,
+                                         giveEscapeMat=False,giveCounts=False,
+                                         giveCountsMat=False):
+    bootResults=[]
+    stratifyColumns=[windowColumn]
+    if (not (repColumn is None)) & \
+        (repColumn in groupDataFrame):
+        stratifyColumns.append(repColumn)
+    print("Running sample (out of {:g}):".format(nBootSamples),end=" ")
+    iSample=0
+    lastSample=-1
+    while iSample < nBootSamples:
+        if iSample>lastSample:
+            print(iSample+1,end="")
+        else:
+            print('',end="")
+        lastSample=iSample
+        bootData=resample(groupDataFrame,
+         n_samples=bootSampleSize,replace=True,
+         stratify=groupDataFrame[stratifyColumns])
+        piResults=compute_analysis_group_pi_vector(
+            bootData,windowColumn,binSet,
+            giveBins=False,giveBinMap=False,
+            giveEscapeMat=True,giveCounts=False,
+            giveCountsMat=False)
+        eMat=piResults['escapeMat']
+        netBreaks=np.sum(np.abs((eMat>0)-(eMat.T>0)))
+        if netBreaks==0:
+            iSample+=1
+            bootResults.append(piResults['piVec'])
+            print(",",end=" ")
+        else:
+            print('x{:g}'.format(netBreaks),end="")
+    print(" ")
+    return(bootResults)
+        
 def compute_analysis_group_pi_vector(groupDataFrame,windowColumn,binSet,
                                      giveBins=False,giveBinMap=False,
                                      giveEscapeMat=False,giveCounts=False,
@@ -626,7 +669,7 @@ def compute_analysis_group_Qdata(groupDataFrame,windowColumn,binSet,
     piData=compute_analysis_group_pi_vector(
         groupDataFrame,windowColumn,binSet,
         giveBins=False,giveBinMap=False,
-        giveEscapeMat=False,giveCounts=True,
+        giveEscapeMat=giveEscapeMat,giveCounts=True,
         giveCountsMat=True)
     
     piVec=piData['piVec']
@@ -644,8 +687,8 @@ def compute_analysis_group_Qdata(groupDataFrame,windowColumn,binSet,
             print(repGroup[0],end=" ")
             transitionData=compute_bin_edge_transitions(
                 binInd=windowGroup[0],
-                escapeVec=np.array(repGroup[1]['Escape_Vector'])[1:],
-                reentryVec=np.array(repGroup[1]['Reentry_Vector'])[:-1],
+                escapeVec=np.array(repGroup[1]['Escape_Vector']),
+                reentryVec=np.array(repGroup[1]['Reentry_Vector']),
                 binSet=binSet,
                 edgeMaps=edgeInfo,giveBins=False,giveBinMap=False,
                 giveEdgeMaps=False,verbose=False)
@@ -661,6 +704,11 @@ def compute_analysis_group_Qdata(groupDataFrame,windowColumn,binSet,
     outDict={
         'Rmat':Rmat,
         'Nmat':Nmat}
+    
+    if giveEscapeMat:
+        outDict['escapeMat']=piData['escapeMat']
+    if giveCountsMat:
+        outDict['countsMat']=piData['countsMat']
     if givePiVec:
         outDict['piVec']=piVec
 
