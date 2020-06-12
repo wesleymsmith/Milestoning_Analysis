@@ -8,8 +8,8 @@ c====================================================
         implicit none
         integer nimage,nxx,jmin,jmin0,imother,tmother
         !nimage: number of cells 
-        parameter(nimage=17)
-        parameter(nxx=200)
+        parameter(nimage=21)
+        parameter(nxx=5000)
         integer icell(nimage),k,kk,ii,j,i,ij
         double precision mc1,cd1,cdist(nimage)
         double precision mindist,mindistr

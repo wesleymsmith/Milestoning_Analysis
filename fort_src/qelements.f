@@ -9,7 +9,7 @@ c====================================================
         integer nimage,nxx,jmin,jmin0,n12,n21,n11,n22,r1,r2
         integer nimagem,nimagep
         integer nm,nm0,nT
-        parameter(nxx=200)
+        parameter(nxx=5000)
         integer j,i
 
 

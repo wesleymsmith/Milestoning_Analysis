@@ -619,16 +619,44 @@ def filter_matRow_entries(mat,giveEntryMap=True,
     else:
         return(matRed)
     
-def get_tau(qhat,entryMap,indToPairMap):
-    bvec=np.zeros(len(qhat))-1
-    tauData=np.linalg.lstsq(qhat,bvec,rcond=None)
+def get_tau(qhat,entryMap,indToPairMap,
+            bVec=None,sinkInds=None,
+            verbose=False):
+    if bVec is None:
+        bvec=np.zeros(len(qhat))-1
+    elif len(bVec) != len(qhat):
+        bvec=np.zeros(len(qhat))-1
+    else:
+        bvec=copy.deepcopy(bVec)
+    
+    Qhat=copy.deepcopy(qhat)
+    if not (sinkInds is None):
+        for sinkInd in sinkInds:
+            Qhat[sinkInd,:]=0
+            Qhat[:,sinkInd]=0
+            #bvec[sinkInd]=0
+        if verbose:
+            print('new Qhat:',Qhat)
+            #print('new bvec',bvec)
+    else:
+        #Qhat[-1,:]=0
+        #Qhat[:,-1]=0
+        Qhat=Qhat[:-1,:-1]
+        bvec=np.zeros(len(Qhat))-1
+        #bvec[-1]=0
+        if verbose:
+            print('assuming last window is sink')
+            print('new Qhat:',Qhat)
+            print('new bvec',bvec)
+    tauData=np.linalg.lstsq(Qhat,bvec,rcond=None)
     tauVec=tauData[0]
     
     pairStr='{:g}_{:g}'
     tauDict={}
     for iTau,tau in enumerate(tauVec):
         binPair=indToPairMap[entryMap[iTau]]
-        print(binPair)
+        if verbose:
+            print(binPair)
         binPairStr=pairStr.format(binPair[0],binPair[1])
         if binPairStr in tauDict:
             tauDict[binPairStr]=np.min([tauDict[binPairStr],tau])
@@ -637,10 +665,12 @@ def get_tau(qhat,entryMap,indToPairMap):
     return((tauDict,tauVec,tauData))
     
 def compute_analysis_group_Qdata(groupDataFrame,windowColumn,binSet,
+                                 sourceWindows=None,sinkWindows=None,
                                      repColumn='Rep',givePiVec=True,
                                      giveBins=False,giveBinMap=False,
                                      giveEscapeMat=False,giveCounts=False,
-                                     giveCountsMat=False,giveEdgeMap=False):
+                                     giveCountsMat=False,giveEdgeMap=False,
+                                     giveQtargets=True):
     
     piDataDict=compute_analysis_group_pi_vector(groupDataFrame,windowColumn,binSet,
                                      giveBins=True,giveBinMap=True,
@@ -711,6 +741,8 @@ def compute_analysis_group_Qdata(groupDataFrame,windowColumn,binSet,
         outDict['countsMat']=piData['countsMat']
     if givePiVec:
         outDict['piVec']=piVec
+    if giveEdgeMap:
+        outDict['edgeMap']=edgeInfo
 
     Ri_vec=np.zeros(nEdges)
     Rpairs=np.nonzero(Rmat)
@@ -726,7 +758,7 @@ def compute_analysis_group_Qdata(groupDataFrame,windowColumn,binSet,
     Qlap=copy.deepcopy(Qmat)
     for iRow,rowVec in enumerate(Qlap):
         Qlap[iRow,iRow]=-np.sum(rowVec)
-        
+
     nNodes=len(bins)
     
     rowAggTest=lambda tMat: np.sum(np.abs(tMat),axis=1)>0
@@ -740,6 +772,9 @@ def compute_analysis_group_Qdata(groupDataFrame,windowColumn,binSet,
     
     outDict['Qhat']=QlapRed
     
+    if giveQtargets:
+        outDict['Qtargets']=Qtargets
+
     bvec=np.zeros(len(QlapRed))-1
     
     tauDict,tauVec,tauVecData=get_tau(
