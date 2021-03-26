@@ -432,11 +432,29 @@ def extract_analysis_columns(milestoneData,windowColumn='Window',xIndexColumn='X
     else:
         repCol=repColumn
         simData[repCol]=milestoneData[repCol]
-    
+
     if frameCol in milestoneData:
         simData[frameCol]=milestoneData[frameCol]
     else:
-        simData[frameCol]=np.arange(len(simData))
+        #simData[frameCol]=np.arange(len(simData))    
+        dataGroupingColumns=[]
+        if not groupingColumn is None:
+            dataGroupingColumns.append(groupingColumn)
+        if not repColumn is None:
+            dataGroupingColumns.append(repColumn)
+        dataGroupingColumns.append(windowColumn)
+        groupTables=[]
+        groups=simData.groupby(dataGroupingColumns)
+        for group in groups:
+            groupName,groupData=group
+            tempDat=groupData.copy()
+            tempDat[frameCol]=np.arange(len(tempDat))
+            groupTables.append(tempDat.copy())
+            gc.collect()
+        simData=pd.concat(groupTables)
+        groupTables=[]
+        tempDat=[]
+        gc.collect()
     
     return(simData)
 
@@ -670,6 +688,7 @@ def compute_analysis_group_Qdata(groupDataFrame,windowColumn,binSet,
                                      giveBins=False,giveBinMap=False,
                                      giveEscapeMat=False,giveCounts=False,
                                      giveCountsMat=False,giveEdgeMap=False,
+                                     giveRiVec=False,giveNijMat=False,
                                      giveQtargets=True):
     
     piDataDict=compute_analysis_group_pi_vector(groupDataFrame,windowColumn,binSet,
@@ -694,7 +713,6 @@ def compute_analysis_group_Qdata(groupDataFrame,windowColumn,binSet,
     
     windowGroups=groupDataFrame.groupby(windowColumn)
     
-    
         
     piData=compute_analysis_group_pi_vector(
         groupDataFrame,windowColumn,binSet,
@@ -705,7 +723,7 @@ def compute_analysis_group_Qdata(groupDataFrame,windowColumn,binSet,
     piVec=piData['piVec']
     countVec=piData['counts']
     Tcount=np.sum(piVec/countVec)**-1
-   
+    
     
     Rmat=sp.sparse.lil_matrix((nBins,nBins))
     Nmat=sp.sparse.lil_matrix((nEdges,nEdges))
@@ -735,6 +753,9 @@ def compute_analysis_group_Qdata(groupDataFrame,windowColumn,binSet,
         'Rmat':Rmat,
         'Nmat':Nmat}
     
+    
+    if giveCounts:
+        outDict['countVec']=countVec
     if giveEscapeMat:
         outDict['escapeMat']=piData['escapeMat']
     if giveCountsMat:
@@ -754,6 +775,10 @@ def compute_analysis_group_Qdata(groupDataFrame,windowColumn,binSet,
         Qmat[Redge,:]=Nmat[Redge,:]/Ri_vec[Redge]
     
     outDict['Qmat']=Qmat
+    if giveRiVec:
+        outDict['RiVec']=Ri_vec
+    if giveNijMat:
+        outDict['NijMat']=Nmat
     
     Qlap=copy.deepcopy(Qmat)
     for iRow,rowVec in enumerate(Qlap):
